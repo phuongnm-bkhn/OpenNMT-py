@@ -2,12 +2,14 @@
 """ Translator Class and builder """
 from __future__ import print_function
 import codecs
+import copy
 import os
 import math
 import time
 from itertools import count
 
 import torch
+from typing import List
 
 import onmt.model_builder
 import onmt.translate.beam
@@ -165,6 +167,10 @@ class Translator(object):
             raise ValueError(
                 "Coverage penalty requires an attentional decoder.")
         self.out_file = out_file
+        self.out_file_tgt_gold = codecs.open(out_file.stream.name + ".tgt.gold.txt", 'w+', 'utf-8')
+        self.out_file_tgt_pred = codecs.open(out_file.stream.name + ".tgt.pred.txt", 'w+', 'utf-8')
+        self.out_file_src_label_pred = codecs.open(out_file.stream.name + ".src.label.pred.txt", 'w+', 'utf-8')
+        self.out_file_src_label_gold = codecs.open(out_file.stream.name + ".src.label.gold.txt", 'w+', 'utf-8')
         self.report_score = report_score
         self.logger = logger
 
@@ -261,6 +267,30 @@ class Translator(object):
             gs = [0] * batch_size
         return gs
 
+    @staticmethod
+    def merge_sentence_label(enc_label: List[str], enc_raw: List[str], dec_words: List[str]) -> List[str]:
+        assert len(enc_label) == len(enc_raw)
+        lb_info = {}
+        for i, lb in enumerate(enc_label):
+            if lb.startswith("B-"):
+                entity_name = lb[len("B-"):]
+                lb_info[entity_name] = {
+                    "values": [enc_raw[i]],
+                    "start": i,
+                    "end": i+1,
+                }
+                for j in range(i + 1, len(enc_label)):
+                    if enc_label[j] == "I-" + entity_name:
+                        lb_info[entity_name]["values"].append(enc_raw[i])
+                        lb_info[entity_name]["end"] += 1
+        new_dec_words = copy.deepcopy(dec_words)
+        for i, word in enumerate(dec_words):
+            if word in lb_info:
+                new_dec_words.pop(i)
+                for j, w_src in enumerate(lb_info[word]["values"]):
+                    new_dec_words.insert(i+j, w_src)
+        return new_dec_words
+
     def translate(
             self,
             src,
@@ -342,7 +372,19 @@ class Translator(object):
                 n_best_preds = [" ".join(pred)
                                 for pred in trans.pred_sents[:self.n_best]]
                 all_predictions += [n_best_preds]
-                self.out_file.write('\n'.join(n_best_preds) + '\n')
+
+                self.out_file_tgt_pred.write('\n'.join(n_best_preds) + '\n')
+                self.out_file_tgt_pred.flush()
+                self.out_file_tgt_gold.write(' '.join(trans.gold_sent) + '\n')
+                self.out_file_tgt_gold.flush()
+
+                self.out_file_src_label_pred.write(' '.join(trans.src_label) + '\n')
+                self.out_file_src_label_pred.flush()
+                self.out_file_src_label_gold.write(' '.join(trans.src_label_gold) + '\n')
+                self.out_file_src_label_gold.flush()
+
+                self.out_file.write(' '.join(self.merge_sentence_label(trans.src_label, trans.src_raw,
+                                                                       trans.pred_sents[0])) + '\n')
                 self.out_file.flush()
 
                 if self.verbose:
@@ -398,9 +440,9 @@ class Translator(object):
             total_time = end_time - start_time
             self._log("Total translation time (s): %f" % total_time)
             self._log("Average translation time (s): %f" % (
-                total_time / len(all_predictions)))
+                    total_time / len(all_predictions)))
             self._log("Tokens per second: %f" % (
-                pred_words_total / total_time))
+                    pred_words_total / total_time))
 
         if self.dump_beam:
             import json
@@ -524,7 +566,7 @@ class Translator(object):
 
     def _run_encoder(self, batch):
         src, src_lengths = batch.src if isinstance(batch.src, tuple) \
-                           else (batch.src, None)
+            else (batch.src, None)
 
         enc_states, memory_bank, src_lengths = self.model.encoder(
             src, src_lengths)
@@ -532,9 +574,9 @@ class Translator(object):
             assert not isinstance(memory_bank, tuple), \
                 'Ensemble decoding only supported for text data'
             src_lengths = torch.Tensor(batch.batch_size) \
-                               .type_as(memory_bank) \
-                               .long() \
-                               .fill_(memory_bank.size(0))
+                .type_as(memory_bank) \
+                .long() \
+                .fill_(memory_bank.size(0))
         return src, enc_states, memory_bank, src_lengths
 
     def _decode_and_generate(
@@ -615,9 +657,19 @@ class Translator(object):
         src, enc_states, memory_bank, src_lengths = self._run_encoder(batch)
         self.model.decoder.init_state(src, memory_bank, enc_states)
 
+        enc_label_scores = self.model.enc_generator(memory_bank.view(-1, memory_bank.size(2))) \
+            .view(memory_bank.shape[0], memory_bank.shape[1], -1)
+        enc_label = torch.topk(enc_label_scores, 1, dim=-1, )[1].view(enc_label_scores.shape[0], -1).t()
+        enc_label = [enc_label_sent[:src_lengths[i]] for i, enc_label_sent in enumerate(enc_label)]
+        enc_label_gold = batch.src_label.view(batch.src_label.shape[0], -1).t()
+        enc_label_gold = [enc_label_sent[:src_lengths[i]] for i, enc_label_sent in enumerate(enc_label_gold)]
+
         results = {
             "predictions": None,
             "scores": None,
+            "enc_label_scores": enc_label_scores,
+            "enc_label": enc_label,
+            "enc_label_gold": enc_label_gold,
             "attention": None,
             "batch": batch,
             "gold_score": self._gold_score(

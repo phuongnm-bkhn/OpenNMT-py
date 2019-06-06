@@ -108,9 +108,16 @@ class ModelSaver(ModelSaverBase):
         model_state_dict = {k: v for k, v in model_state_dict.items()
                             if 'generator' not in k}
         generator_state_dict = real_generator.state_dict()
+
+        real_enc_generator = (real_model.enc_generator.module
+                              if isinstance(real_model.enc_generator, nn.DataParallel)
+                              else real_model.enc_generator)
+        enc_generator_state_dict = real_enc_generator.state_dict()
+
         checkpoint = {
             'model': model_state_dict,
             'generator': generator_state_dict,
+            'enc_generator': enc_generator_state_dict,
             'vocab': self.fields,
             'opt': self.model_opt,
             'optim': self.optim.state_dict(),

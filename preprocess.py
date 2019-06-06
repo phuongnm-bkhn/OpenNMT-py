@@ -87,6 +87,12 @@ def build_save_vocab(train_dataset, fields, opt):
         vocab_size_multiple=opt.vocab_size_multiple
     )
 
+    fields = inputters.build_vocab_src_label(
+        train_dataset, fields,
+        opt.src_vocab, opt.tgt_vocab_size,
+        vocab_size_multiple=1
+    )
+
     vocab_path = opt.save_data + '.vocab.pt'
     torch.save(fields, vocab_path)
 
@@ -105,7 +111,7 @@ def count_features(path):
 def main(opt):
     ArgumentParser.validate_preprocess_args(opt)
     torch.manual_seed(opt.seed)
-    check_existing_pt_files(opt)
+    # check_existing_pt_files(opt)
 
     init_logger(opt.log_file)
     logger.info("Extracting features...")

@@ -301,10 +301,10 @@ class Trainer(object):
                 tgt = batch.tgt
 
                 # F-prop through the model.
-                outputs, attns = valid_model(src, tgt, src_lengths)
+                outputs, attns, enc_hiddens = valid_model(src, tgt, src_lengths)
 
                 # Compute loss.
-                _, batch_stats = self.valid_loss(batch, outputs, attns)
+                _, batch_stats = self.valid_loss(batch, outputs, attns, enc_hiddens=enc_hiddens)
 
                 # Update statistics.
                 stats.update(batch_stats)
@@ -345,11 +345,19 @@ class Trainer(object):
                 # 2. F-prop all but generator.
                 if self.accum_count == 1:
                     self.optim.zero_grad()
-                outputs, attns = self.model(src, tgt, src_lengths, bptt=bptt)
+                outputs, attns, enc_hiddens = self.model(src, tgt, src_lengths, bptt=bptt)
                 bptt = True
 
                 # 3. Compute loss.
                 try:
+                    # loss, batch_stats = self.train_loss(
+                    #     batch,
+                    #     outputs,
+                    #     attns,
+                    #     normalization=normalization,
+                    #     shard_size=self.shard_size,
+                    #     trunc_start=j,
+                    #     trunc_size=trunc_size)
                     loss, batch_stats = self.train_loss(
                         batch,
                         outputs,
@@ -357,7 +365,8 @@ class Trainer(object):
                         normalization=normalization,
                         shard_size=self.shard_size,
                         trunc_start=j,
-                        trunc_size=trunc_size)
+                        trunc_size=trunc_size,
+                        enc_hiddens=enc_hiddens)
 
                     if loss is not None:
                         self.optim.backward(loss)

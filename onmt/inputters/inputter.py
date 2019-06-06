@@ -116,6 +116,13 @@ def get_fields(
                         "base_name": "tgt"}
     fields["tgt"] = fields_getters["text"](**tgt_field_kwargs)
 
+    tgt_field_kwargs = {"n_feats": 0,
+                        "include_lengths": False,
+                        "pad": pad, "bos": None, "eos": None,
+                        "truncate": tgt_truncate,
+                        "base_name": "src_label"}
+    fields["src_label"] = fields_getters["text"](**tgt_field_kwargs)
+
     indices = Field(use_vocab=False, dtype=torch.long, sequential=False)
     fields["indices"] = indices
 
@@ -420,6 +427,76 @@ def build_vocab(train_dataset_files, fields, data_type, share_vocab,
                 min_freq=src_words_min_frequency,
                 vocab_size_multiple=vocab_size_multiple)
             logger.info(" * merged vocab size: %d." % len(src_field.vocab))
+    return fields  # is the return necessary?
+
+
+def build_vocab_src_label(train_dataset_files, fields,
+                tgt_vocab_path, tgt_vocab_size,
+                vocab_size_multiple=1):
+    """Build the fields for all data sides.
+
+    Args:
+        train_dataset_files: a list of train dataset pt file.
+        fields (dict[str, Field]): fields to build vocab for.
+        data_type (str): A supported data type string.
+        share_vocab (bool): share source and target vocabulary?
+        tgt_vocab_path (str): Path to tgt vocabulary file.
+        tgt_vocab_size (int): size of the target vocabulary.
+        tgt_words_min_frequency (int): the minimum frequency needed to
+            include a target word in the vocabulary.
+        vocab_size_multiple (int): ensure that the vocabulary size is a
+            multiple of this value.
+
+    Returns:
+        Dict of Fields
+    """
+
+    counters = defaultdict(Counter)
+
+    if tgt_vocab_path:
+        tgt_vocab, tgt_vocab_size = _load_vocab(
+            tgt_vocab_path, "src_label", counters, 0)
+    else:
+        tgt_vocab = None
+
+    for i, path in enumerate(train_dataset_files):
+        dataset = torch.load(path)
+        logger.info(" * reloading %s." % path)
+        for ex in dataset.examples:
+            for name, field in fields.items():
+                try:
+                    f_iter = iter(field)
+                except TypeError:
+                    f_iter = [(name, field)]
+                    all_data = [getattr(ex, name, None)]
+                else:
+                    all_data = getattr(ex, name)
+                for (sub_n, sub_f), fd in zip(
+                        f_iter, all_data):
+                    has_vocab = (sub_n == 'src_label' and tgt_vocab)
+                    if sub_f.sequential and not has_vocab:
+                        val = fd
+                        counters[sub_n].update(val)
+
+        # Drop the none-using from memory but keep the last
+        if i < len(train_dataset_files) - 1:
+            dataset.examples = None
+            gc.collect()
+            del dataset.examples
+            gc.collect()
+            del dataset
+            gc.collect()
+
+    build_fv_args = defaultdict(dict)
+    build_fv_args["src_label"] = dict(
+        max_size=tgt_vocab_size, min_freq=0)
+    tgt_multifield = fields["src_label"]
+    _build_fv_from_multifield(
+        tgt_multifield,
+        counters,
+        build_fv_args,
+        size_multiple=1)
+
     return fields  # is the return necessary?
 
 
