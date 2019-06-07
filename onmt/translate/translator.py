@@ -281,7 +281,7 @@ class Translator(object):
                 }
                 for j in range(i + 1, len(enc_label)):
                     if enc_label[j] == "I-" + entity_name:
-                        lb_info[entity_name]["values"].append(enc_raw[i])
+                        lb_info[entity_name]["values"].append(enc_raw[j])
                         lb_info[entity_name]["end"] += 1
         new_dec_words = copy.deepcopy(dec_words)
         for i, word in enumerate(dec_words):
