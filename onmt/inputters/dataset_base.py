@@ -119,6 +119,7 @@ class Dataset(TorchtextDataset):
             encode_words, decode_words, decode_transformed, encode_labels = \
                 Dataset.matching_enc_label(src_str.decode("utf-8") , tgt_str.decode("utf-8") )
             data[1][1][i] = (" ".join(decode_transformed)).encode('utf-8')
+            data[0][1][i] = (" ".join(encode_words)).encode('utf-8')
             transformed_data.append((encode_words, decode_words, decode_transformed, encode_labels))
 
         read_iters = [r.read(dat[1], dat[0], dir_) for r, dat, dir_
@@ -175,11 +176,7 @@ class Dataset(TorchtextDataset):
         decode_str = decode_str.strip()
 
         # - case: (us|united states|america) in encode and (usa) in decode
-        if (" us " in encode_str or " united states " in encode_str or " america " in encode_str) \
-                and " usa " in decode_str:
-            encode_str = encode_str.replace(" us ", " usa ") \
-                .replace(" united states ", " usa ") \
-                .replace(" america ", " usa ")
+        encode_str = Dataset.abbreviate_recover(encode_str)
 
         encode_words = encode_str.split()
         encode_labels = ["O"] * len(encode_words)
@@ -211,3 +208,14 @@ class Dataset(TorchtextDataset):
 
         decode_transformed = decode_str.split()
         return encode_words, decode_words, decode_transformed, encode_labels
+
+    @staticmethod
+    def abbreviate_recover(input_str):
+        abbr_vocab = {
+            "us": "usa",
+            "united states": "usa",
+            "america": "usa",
+        }
+        for k, v in abbr_vocab.items():
+            input_str = re.sub("( |^){}( |$)".format(k), '\\1{}\\2'.format(v), input_str)
+        return input_str
