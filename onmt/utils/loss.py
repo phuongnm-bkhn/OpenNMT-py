@@ -306,10 +306,6 @@ class NMTMarkLossCompute(NMTLossCompute):
         batch_stats.update(stats)
 
         # loss for encoder
-        # fake enc label
-        # enc_labels = torch.LongTensor([[(i+j) % 4 for j in range(enc_hiddens.shape[1])] for i in range(enc_hiddens.shape[0])])\
-        #     .view(enc_hiddens.shape[0], enc_hiddens.shape[1], 1)
-
         trunc_size = batch.src[0].size(0) - trunc_start
         trunc_range = (trunc_start, trunc_start + trunc_size)
         shard_state = self._make_shard_state_enc(enc_hiddens, trunc_range, batch.src_label)

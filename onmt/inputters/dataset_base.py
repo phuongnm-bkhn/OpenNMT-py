@@ -198,7 +198,7 @@ class Dataset(TorchtextDataset):
                 last_idx = -1
         for i, e_val in enumerate(elements):
             if re.search("( |^){}( |$)".format(e_val), decode_str) is not None:
-                decode_str = re.sub("( |^){}( |$)".format(e_val),'\\1arg_{}:lb\\2'.format(i + 1), decode_str)
+                decode_str = re.sub("( |^){}( |$)".format(e_val),'\\1arg_{}:lb\\2'.format(i + 1), decode_str, count=1)
             else:
                 logging.warning("- [W] {} not exist in decode_str {}".format(e_val, decode_str))
 
