@@ -284,11 +284,13 @@ class Translator(object):
                         lb_info[entity_name]["values"].append(enc_raw[j])
                         lb_info[entity_name]["end"] += 1
         new_dec_words = copy.deepcopy(dec_words)
+        offset = 0
         for i, word in enumerate(dec_words):
             if word in lb_info:
-                new_dec_words.pop(i)
+                new_dec_words.pop(offset+i)
                 for j, w_src in enumerate(lb_info[word]["values"]):
-                    new_dec_words.insert(i+j, w_src)
+                    new_dec_words.insert(i+offset+j, w_src)
+                offset += (len(lb_info[word]["values"]) - 1)
         return new_dec_words
 
     def translate(
