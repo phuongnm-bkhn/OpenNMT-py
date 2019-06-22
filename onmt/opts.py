@@ -179,6 +179,9 @@ def model_opts(parser):
     group.add('--loss_scale', '-loss_scale', type=float, default=0,
               help="For FP16 training, the static loss scale to use. If not "
                    "set, the loss scale is dynamically computed.")
+    group.add('--lambda_marking_mechanism', '-lambda_marking_mechanism', type=float, default=0.5,
+              help="lambda to adjust error rate between source and target label.")
+
 
 
 def preprocess_opts(parser):

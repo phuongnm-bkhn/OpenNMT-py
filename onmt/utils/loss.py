@@ -52,8 +52,9 @@ def build_loss_compute(model, tgt_field, opt, train=True):
     else:
         # compute = NMTLossCompute(criterion, loss_gen)
         compute = NMTMarkLossCompute(criterion, loss_gen,
-                                 enc_criterion=nn.NLLLoss(ignore_index=padding_idx, reduction='sum'),
-                                 enc_generator=model.enc_generator)
+                                     enc_criterion=nn.NLLLoss(ignore_index=padding_idx, reduction='sum'),
+                                     enc_generator=model.enc_generator,
+                                     lambda_marking_mechanism=opt.lambda_marking_mechanism)
     compute.to(device)
 
     return compute
@@ -247,10 +248,12 @@ class NMTMarkLossCompute(NMTLossCompute):
     Standard NMT Loss Computation.
     """
 
-    def __init__(self, criterion, generator, normalization="sents", enc_criterion=None, enc_generator=None):
+    def __init__(self, criterion, generator, normalization="sents", enc_criterion=None, enc_generator=None,
+                 lambda_marking_mechanism=0.5):
         super(NMTMarkLossCompute, self).__init__(criterion, generator, normalization)
         self.enc_criterion = enc_criterion
         self.enc_generator = enc_generator
+        self.lambda_marking_mechanism = lambda_marking_mechanism
 
     def _make_shard_state_enc(self, output, range_, target=None):
         return {
@@ -302,7 +305,7 @@ class NMTMarkLossCompute(NMTLossCompute):
         shard_state = self._make_shard_state(batch, output, trunc_range, attns)
         batch_stats = onmt.utils.Statistics()
         loss, stats = self._compute_loss(batch, **shard_state)
-        total_loss.append(loss)
+        total_loss.append((1-self.lambda_marking_mechanism)*loss)
         batch_stats.update(stats)
 
         # loss for encoder
@@ -310,10 +313,10 @@ class NMTMarkLossCompute(NMTLossCompute):
         trunc_range = (trunc_start, trunc_start + trunc_size)
         shard_state = self._make_shard_state_enc(enc_hiddens, trunc_range, batch.src_label)
         loss, stats = self._compute_loss_enc(**shard_state)
-        total_loss.append(loss)
+        total_loss.append(self.lambda_marking_mechanism * loss)
         batch_stats.update(stats)
 
-        return sum(total_loss).mean().div(float(normalization)), batch_stats
+        return sum(total_loss).div(float(normalization)), batch_stats
 
     def _compute_loss_enc(self, output, target):
         bottled_output = self._bottle(output)
