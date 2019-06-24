@@ -60,7 +60,8 @@ def build_save_dataset(corpus_type, fields, src_reader, tgt_reader, opt):
                   if tgt_reader else [("src", src_shard)]),
             dirs=[opt.src_dir, None] if tgt_reader else [opt.src_dir],
             sort_key=inputters.str2sortkey[opt.data_type],
-            filter_pred=filter_pred
+            filter_pred=filter_pred,
+            marking_condition=opt.marking_condition
         )
 
         data_path = "{:s}.{:s}.{:d}.pt".format(opt.save_data, corpus_type, i)

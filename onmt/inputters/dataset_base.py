@@ -1,6 +1,7 @@
 # coding: utf-8
 import logging
 import re
+import copy
 from itertools import chain, starmap
 from collections import Counter
 
@@ -108,8 +109,9 @@ class Dataset(TorchtextDataset):
     """
 
     def __init__(self, fields, readers, data, dirs, sort_key,
-                 filter_pred=None):
+                 filter_pred=None, marking_condition=None):
         self.sort_key = sort_key
+        self.marking_condition = marking_condition
         can_copy = 'src_map' in fields and 'alignment' in fields
 
         count_sample = len(data[0][1])
@@ -117,7 +119,7 @@ class Dataset(TorchtextDataset):
         for i in range(count_sample):
             src_str, tgt_str = data[0][1][i], data[1][1][i]
             encode_words, decode_words, decode_transformed, encode_labels = \
-                Dataset.matching_enc_label(src_str.decode("utf-8") , tgt_str.decode("utf-8") )
+                Dataset.matching_enc_label(src_str.decode("utf-8") , tgt_str.decode("utf-8"), marking_condition)
             data[1][1][i] = (" ".join(decode_transformed)).encode('utf-8')
             data[0][1][i] = (" ".join(encode_words)).encode('utf-8')
             transformed_data.append((encode_words, decode_words, decode_transformed, encode_labels))
@@ -171,17 +173,21 @@ class Dataset(TorchtextDataset):
         torch.save(self, path)
 
     @staticmethod
-    def matching_enc_label(encode_str: str, decode_str: str):
+    def matching_enc_label(encode_str: str, decode_str: str, marking_condition=None):
         encode_str = encode_str.strip()
         decode_str = decode_str.strip()
 
-        # - case: (us|united states|america) in encode and (usa) in decode
-        encode_str = Dataset.abbreviate_recover(encode_str)
 
         encode_words = encode_str.split()
         encode_labels = ["O"] * len(encode_words)
         decode_words = decode_str.split()
         w_intersection = set(encode_words).intersection(set(decode_words))
+
+        if marking_condition is not None:
+            w_intersection2 = copy.deepcopy(w_intersection)
+            for w in w_intersection2:
+                if not re.match(marking_condition, w):
+                    w_intersection.remove(w)
 
         last_idx = -1
         elements = []
@@ -209,14 +215,3 @@ class Dataset(TorchtextDataset):
 
         decode_transformed = decode_str.split()
         return encode_words, decode_words, decode_transformed, encode_labels
-
-    @staticmethod
-    def abbreviate_recover(input_str):
-        abbr_vocab = {
-            "us": "usa",
-            "united states": "usa",
-            "america": "usa",
-        }
-        for k, v in abbr_vocab.items():
-            input_str = re.sub("( |^){}( |$)".format(k), '\\1{}\\2'.format(v), input_str)
-        return input_str

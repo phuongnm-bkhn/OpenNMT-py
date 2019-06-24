@@ -218,6 +218,8 @@ def preprocess_opts(parser):
                    "shard_size=0 means no segmentation "
                    "shard_size>0 means segment dataset into multiple shards, "
                    "each shard has shard_size samples")
+    group.add('--marking_condition', '-marking_condition', type=str, default=None,
+              help="pattern to match label in marking step")
 
     # Dictionary options, for text corpus
 
