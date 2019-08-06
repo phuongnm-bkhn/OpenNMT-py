@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """Train models."""
 import os
+import random
 import signal
 import torch
 
@@ -11,6 +12,14 @@ from onmt.utils.logging import logger
 from onmt.train_single import main as single_main
 from onmt.utils.parse import ArgumentParser
 
+import numpy as np
+
+seed_number = 0
+np.random.seed(seed=seed_number)
+torch.manual_seed(seed_number)
+random.seed(seed_number)
+# if opt.cuda:
+#     torch.cuda.manual_seed_all(opt.manualSeed)
 
 def main(opt):
     ArgumentParser.validate_train_opts(opt)

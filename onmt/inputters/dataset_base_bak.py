@@ -1,7 +1,6 @@
 # coding: utf-8
 import logging
 import re
-import copy
 from itertools import chain, starmap
 from collections import Counter
 
@@ -109,24 +108,16 @@ class Dataset(TorchtextDataset):
     """
 
     def __init__(self, fields, readers, data, dirs, sort_key,
-                 filter_pred=None, marking_condition=None):
+                 filter_pred=None):
         self.sort_key = sort_key
-        self.marking_condition = marking_condition
         can_copy = 'src_map' in fields and 'alignment' in fields
 
         count_sample = len(data[0][1])
         transformed_data = []
-
-        # fake target string
-        if len(data) == 1:
-            data.append(('tgt', ['']*len(data[0][1])))
-
         for i in range(count_sample):
             src_str, tgt_str = data[0][1][i], data[1][1][i]
             encode_words, decode_words, decode_transformed, encode_labels = \
-                Dataset.matching_enc_label(src_str.decode("utf-8") if isinstance(src_str, bytes) else src_str,
-                                           tgt_str.decode("utf-8") if isinstance(src_str, bytes) else tgt_str,
-                                           marking_condition)
+                Dataset.matching_enc_label(src_str.decode("utf-8") , tgt_str.decode("utf-8") )
             data[1][1][i] = (" ".join(decode_transformed)).encode('utf-8')
             data[0][1][i] = (" ".join(encode_words)).encode('utf-8')
             transformed_data.append((encode_words, decode_words, decode_transformed, encode_labels))
@@ -180,21 +171,23 @@ class Dataset(TorchtextDataset):
         torch.save(self, path)
 
     @staticmethod
-    def matching_enc_label(encode_str: str, decode_str: str, marking_condition=None):
+    def matching_enc_label(encode_str: str, decode_str: str):
         encode_str = encode_str.strip()
         decode_str = decode_str.strip()
 
+        # - case: (us|united states|america) in encode and (usa) in decode
+        encode_str = Dataset.abbreviate_recover(encode_str)
 
         encode_words = encode_str.split()
         encode_labels = ["O"] * len(encode_words)
         decode_words = decode_str.split()
         w_intersection = set(encode_words).intersection(set(decode_words))
 
-        if marking_condition is not None:
-            w_intersection2 = copy.deepcopy(w_intersection)
-            for w in w_intersection2:
-                if not re.match(marking_condition, w):
-                    w_intersection.remove(w)
+        import copy
+        w_intersection2 = copy.deepcopy(w_intersection)
+        for w in w_intersection2:
+            if not re.match(r".*\d$", w):
+                w_intersection.remove(w)
 
         last_idx = -1
         elements = []
@@ -210,11 +203,7 @@ class Dataset(TorchtextDataset):
             else:
                 last_idx = -1
         for i, e_val in enumerate(elements):
-            if "(" in e_val:
-                print()
-            term_search = re.compile("( |^){}( |$)".format(e_val.replace("+","\+")
-                                                           .replace("(","\(").replace(")","\)").replace("*","\*")))
-
+            term_search = re.compile("( |^){}( |$)".format(e_val.replace("+","\+")))
             if term_search.search(decode_str) is not None:
                 decode_str = term_search.sub('\\1arg_{}:lb\\2'.format(i + 1), decode_str, count=1)
             else:
@@ -226,3 +215,14 @@ class Dataset(TorchtextDataset):
 
         decode_transformed = decode_str.split()
         return encode_words, decode_words, decode_transformed, encode_labels
+
+    @staticmethod
+    def abbreviate_recover(input_str):
+        abbr_vocab = {
+            "us": "usa",
+            "united states": "usa",
+            "america": "usa",
+        }
+        for k, v in abbr_vocab.items():
+            input_str = re.sub("( |^){}( |$)".format(k), '\\1{}\\2'.format(v), input_str)
+        return input_str

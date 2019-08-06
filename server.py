@@ -22,6 +22,7 @@ def start(config_file,
     app.route = prefix_route(app.route, url_root)
     translation_server = TranslationServer()
     translation_server.start(config_file)
+    app.config['JSON_AS_ASCII'] = False
 
     @app.route('/models', methods=['GET'])
     def get_models():

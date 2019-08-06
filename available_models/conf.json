@@ -1,0 +1,15 @@
+{
+    "models_root": "../avaiable_models/travel",
+    "models": [
+        {
+            "id": 100,
+            "model": "travel-model0_step_1200.pt",
+            "timeout": 600,
+            "on_timeout": "unload",
+            "load": true,
+            "opt": {
+                "beam_size": 5
+            }
+        }
+    ]
+}

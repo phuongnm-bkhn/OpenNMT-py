@@ -167,10 +167,10 @@ class Translator(object):
             raise ValueError(
                 "Coverage penalty requires an attentional decoder.")
         self.out_file = out_file
-        self.out_file_tgt_gold = codecs.open(out_file.stream.name + ".tgt.gold.txt", 'w+', 'utf-8')
-        self.out_file_tgt_pred = codecs.open(out_file.stream.name + ".tgt.pred.txt", 'w+', 'utf-8')
-        self.out_file_src_label_pred = codecs.open(out_file.stream.name + ".src.label.pred.txt", 'w+', 'utf-8')
-        self.out_file_src_label_gold = codecs.open(out_file.stream.name + ".src.label.gold.txt", 'w+', 'utf-8')
+        # self.out_file_tgt_gold = codecs.open(out_file.stream.name + ".tgt.gold.txt", 'w+', 'utf-8')
+        # self.out_file_tgt_pred = codecs.open(out_file.stream.name + ".tgt.pred.txt", 'w+', 'utf-8')
+        # self.out_file_src_label_pred = codecs.open(out_file.stream.name + ".src.label.pred.txt", 'w+', 'utf-8')
+        # self.out_file_src_label_gold = codecs.open(out_file.stream.name + ".src.label.gold.txt", 'w+', 'utf-8')
         self.report_score = report_score
         self.logger = logger
 
@@ -373,21 +373,26 @@ class Translator(object):
 
                 n_best_preds = [" ".join(pred)
                                 for pred in trans.pred_sents[:self.n_best]]
-                all_predictions += [n_best_preds]
 
-                self.out_file_tgt_pred.write('\n'.join(n_best_preds) + '\n')
-                self.out_file_tgt_pred.flush()
-                self.out_file_tgt_gold.write(' '.join(trans.gold_sent) + '\n')
-                self.out_file_tgt_gold.flush()
+                if hasattr(self, 'out_file_tgt_pred'):
+                    self.out_file_tgt_pred.write('\n'.join(n_best_preds) + '\n')
+                    self.out_file_tgt_pred.flush()
+                    self.out_file_tgt_gold.write(' '.join(trans.gold_sent) + '\n')
+                    self.out_file_tgt_gold.flush()
 
-                self.out_file_src_label_pred.write(' '.join(trans.src_label) + '\n')
-                self.out_file_src_label_pred.flush()
-                self.out_file_src_label_gold.write(' '.join(trans.src_label_gold) + '\n')
-                self.out_file_src_label_gold.flush()
+                    self.out_file_src_label_pred.write(' '.join(trans.src_label) + '\n')
+                    self.out_file_src_label_pred.flush()
+                    self.out_file_src_label_gold.write(' '.join(trans.src_label_gold) + '\n')
+                    self.out_file_src_label_gold.flush()
+                new_decode_sentence = self.merge_sentence_label(trans.src_label, trans.src_raw, trans.pred_sents[0])
+                trans.pred_sents[0] = new_decode_sentence
 
-                self.out_file.write(' '.join(self.merge_sentence_label(trans.src_label, trans.src_raw,
-                                                                       trans.pred_sents[0])) + '\n')
+                self.out_file.write(' '.join(new_decode_sentence) + '\n')
                 self.out_file.flush()
+
+                n_best_preds = [" ".join(pred)
+                                for pred in trans.pred_sents[:self.n_best]]
+                all_predictions += [n_best_preds]
 
                 if self.verbose:
                     sent_number = next(counter)
@@ -674,9 +679,10 @@ class Translator(object):
             "enc_label_gold": enc_label_gold,
             "attention": None,
             "batch": batch,
-            "gold_score": self._gold_score(
-                batch, memory_bank, src_lengths, src_vocabs, use_src_map,
-                enc_states, batch_size, src)}
+            "gold_score":  [0] * batch_size #self._gold_score(
+                # batch, memory_bank, src_lengths, src_vocabs, use_src_map,
+                # enc_states, batch_size, src)
+            }
 
         # (2) Repeat src objects `beam_size` times.
         # We use batch_size x beam_size
