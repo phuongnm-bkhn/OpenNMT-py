@@ -183,7 +183,7 @@ class Dataset(TorchtextDataset):
     def matching_enc_label(encode_str: str, decode_str: str, marking_condition=None):
         encode_str = encode_str.strip()
         decode_str = decode_str.strip()
-
+        black_list_w = {"select", "from", "where", "as", "count", "max", "min"}
 
         encode_words = encode_str.split()
         encode_labels = ["O"] * len(encode_words)
@@ -193,7 +193,7 @@ class Dataset(TorchtextDataset):
         if marking_condition is not None:
             w_intersection2 = copy.deepcopy(w_intersection)
             for w in w_intersection2:
-                if not re.match(marking_condition, w):
+                if not re.match(marking_condition, w) or w in black_list_w:
                     w_intersection.remove(w)
 
         last_idx = -1
@@ -210,10 +210,7 @@ class Dataset(TorchtextDataset):
             else:
                 last_idx = -1
         for i, e_val in enumerate(elements):
-            if "(" in e_val:
-                print()
-            term_search = re.compile("( |^){}( |$)".format(e_val.replace("+","\+")
-                                                           .replace("(","\(").replace(")","\)").replace("*","\*")))
+            term_search = re.compile("( |^){}( |$)".format(re.escape(e_val)))
 
             if term_search.search(decode_str) is not None:
                 decode_str = term_search.sub('\\1arg_{}:lb\\2'.format(i + 1), decode_str, count=1)
