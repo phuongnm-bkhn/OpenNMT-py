@@ -1,6 +1,7 @@
 """Module defining encoders."""
 from onmt.encoders.combined_transformer_rnn import CombinedTransformerRnnEncoder
 from onmt.encoders.encoder import EncoderBase
+from onmt.encoders.rnn_self_att_encoder import RNNSelfAttentionEncoder
 from onmt.encoders.transformer import TransformerEncoder
 from onmt.encoders.rnn_encoder import RNNEncoder
 from onmt.encoders.cnn_encoder import CNNEncoder
@@ -9,7 +10,7 @@ from onmt.encoders.audio_encoder import AudioEncoder
 from onmt.encoders.image_encoder import ImageEncoder
 
 
-str2enc = {"rnn": RNNEncoder, "brnn": RNNEncoder, "cnn": CNNEncoder,
+str2enc = {"rnn": RNNEncoder, "rnn-selfattn": RNNSelfAttentionEncoder, "brnn": RNNEncoder, "cnn": CNNEncoder,
            "transformer": TransformerEncoder, "transformer-rnn": CombinedTransformerRnnEncoder,
            "img": ImageEncoder, "audio": AudioEncoder, "mean": MeanEncoder}
 
