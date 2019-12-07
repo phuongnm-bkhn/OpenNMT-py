@@ -45,19 +45,9 @@ class CombinedTransformerRnnDecoderLayer(nn.Module):
         self.feed_forward = PositionwiseFeedForward(d_model, d_ff, dropout)
         self.layer_norm_1 = nn.LayerNorm(d_model, eps=1e-6)
         self.layer_norm_2 = nn.LayerNorm(d_model, eps=1e-6)
-        self.lstm_layer = self._build_rnn("LSTM",
-                                          input_size=d_model,
-                                          hidden_size=int(d_model/2) if d_model % 2 == 0 else d_model,
-                                          num_layers=1,
-                                          dropout=dropout,
-                                          bidirectional=True if d_model % 2 == 0 else False)
         self.drop = nn.Dropout(dropout)
         self.full_context_alignment = full_context_alignment
         self.alignment_heads = alignment_heads
-
-    def _build_rnn(self, rnn_type, **kwargs):
-        rnn, _ = rnn_factory(rnn_type, **kwargs)
-        return rnn
 
     def forward(self, *args, **kwargs):
         """ Extend _forward for (possibly) multiple decoder pass:
@@ -148,8 +138,6 @@ class CombinedTransformerRnnDecoderLayer(nn.Module):
                                        mask=src_pad_mask,
                                        layer_cache=layer_cache,
                                        attn_type="context")
-        new_mid, _ = self.lstm_layer(mid.transpose(0, 1))
-        mid = new_mid.transpose(0, 1)
         output = self.feed_forward(self.drop(mid) + query)
 
         return output, attns
@@ -203,6 +191,12 @@ class CombinedTransformerRnnDecoder(DecoderBase):
         # Decoder State
         self.state = {}
 
+        self.lstm_layer = self._build_rnn("LSTM",
+                                          input_size=d_model,
+                                          hidden_size=d_model,
+                                          num_layers=1,
+                                          dropout=dropout)
+
         self.transformer_layers = nn.ModuleList(
             [CombinedTransformerRnnDecoderLayer(d_model, heads, d_ff, dropout,
                                      attention_dropout, self_attn_type=self_attn_type,
@@ -219,6 +213,10 @@ class CombinedTransformerRnnDecoder(DecoderBase):
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
 
         self.alignment_layer = alignment_layer
+
+    def _build_rnn(self, rnn_type, **kwargs):
+        rnn, _ = rnn_factory(rnn_type, **kwargs)
+        return rnn
 
     @classmethod
     def from_opt(cls, opt, embeddings):
@@ -296,6 +294,9 @@ class CombinedTransformerRnnDecoder(DecoderBase):
                 with_align=with_align)
             if attn_align is not None:
                 attn_aligns.append(attn_align)
+
+        output, _ = self.lstm_layer(output.transpose(0, 1))
+        output = output.transpose(0,1)
 
         output = self.layer_norm(output)
         dec_outs = output.transpose(0, 1).contiguous()
