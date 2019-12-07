@@ -5,12 +5,12 @@ Implementation of "Attention is All You Need"
 import torch
 import torch.nn as nn
 
-from onmt.decoders.decoder import DecoderBase
+from onmt.decoders.decoder import DecoderBase, RNNDecoderBase
 from onmt.encoders.combined_transformer_rnn import EmbeddingSkipped
+from onmt.models.stacked_rnn import StackedLSTM, StackedGRU
 from onmt.modules import MultiHeadedAttention, AverageAttention
 from onmt.modules.position_ffn import PositionwiseFeedForward
 from onmt.utils.misc import sequence_mask
-from onmt.utils.rnn_factory import rnn_factory
 
 
 class CombinedTransformerRnnDecoderLayer(nn.Module):
@@ -149,6 +149,172 @@ class CombinedTransformerRnnDecoderLayer(nn.Module):
         self.drop.p = dropout
 
 
+class InputFeedRNNDecoder2(RNNDecoderBase):
+    """Input feeding based decoder.
+
+    See :class:`~onmt.decoders.decoder.RNNDecoderBase` for options.
+
+    Based around the input feeding approach from
+    "Effective Approaches to Attention-based Neural Machine Translation"
+    :cite:`Luong2015`
+
+
+    .. mermaid::
+
+       graph BT
+          A[Input n-1]
+          AB[Input n]
+          subgraph RNN
+            E[Pos n-1]
+            F[Pos n]
+            E --> F
+          end
+          G[Encoder]
+          H[memory_bank n-1]
+          A --> E
+          AB --> F
+          E --> H
+          G --> H
+    """
+
+    def forward(self, transform_emb, memory_bank, memory_lengths=None, step=None,
+                **kwargs):
+        """
+        Args:
+            tgt (LongTensor): sequences of padded tokens
+                 ``(tgt_len, batch, nfeats)``.
+            memory_bank (FloatTensor): vectors from the encoder
+                 ``(src_len, batch, hidden)``.
+            memory_lengths (LongTensor): the padded source lengths
+                ``(batch,)``.
+
+        Returns:
+            (FloatTensor, dict[str, FloatTensor]):
+
+            * dec_outs: output from the decoder (after attn)
+              ``(tgt_len, batch, hidden)``.
+            * attns: distribution over src at each tgt
+              ``(tgt_len, batch, src_len)``.
+        """
+
+        dec_state, dec_outs, attns = self._run_forward_pass(transform_emb, memory_bank, memory_lengths)
+
+        # Update the state with the result.
+        if not isinstance(dec_state, tuple):
+            dec_state = (dec_state,)
+        self.state["hidden"] = dec_state
+        self.state["input_feed"] = dec_outs[-1].unsqueeze(0)
+        self.state["coverage"] = None
+        if "coverage" in attns:
+            self.state["coverage"] = attns["coverage"][-1].unsqueeze(0)
+
+        # Concatenates sequence of tensors along a new dimension.
+        # NOTE: v0.3 to 0.4: dec_outs / attns[*] may not be list
+        #       (in particular in case of SRU) it was not raising error in 0.3
+        #       since stack(Variable) was allowed.
+        #       In 0.4, SRU returns a tensor that shouldn't be stacke
+        if type(dec_outs) == list:
+            dec_outs = torch.stack(dec_outs)
+
+            for k in attns:
+                if type(attns[k]) == list:
+                    attns[k] = torch.stack(attns[k])
+        return dec_outs, attns
+
+    def _run_forward_pass(self, transform_emb, memory_bank, memory_lengths=None):
+        """
+        See StdRNNDecoder._run_forward_pass() for description
+        of arguments and return values.
+        """
+        # Additional args check.
+        batch_size = memory_bank.size(1)
+        self.state["coverage"] = None
+        self.state["input_feed"] = \
+            memory_bank.transpose(0,1)[0].data.new(batch_size, self.hidden_size)\
+                .zero_().unsqueeze(0)
+        self.state["hidden"] = (
+            memory_bank.transpose(0,1)[0].data.new(batch_size, self.hidden_size) \
+                .zero_().unsqueeze(0),
+            memory_bank.transpose(0,1)[0].data.new(batch_size, self.hidden_size) \
+                .zero_().unsqueeze(0))
+        input_feed = self.state["input_feed"].squeeze(0)
+
+        input_feed_batch, _ = input_feed.size()
+        # aeq(tgt_batch, input_feed_batch)
+        # END Additional args check.
+
+        dec_outs = []
+        attns = {}
+        if self.attn is not None:
+            attns["std"] = []
+        if self.copy_attn is not None or self._reuse_copy_attn:
+            attns["copy"] = []
+        if self._coverage:
+            attns["coverage"] = []
+
+        emb = transform_emb.transpose(0,1)
+        assert emb.dim() == 3  # len x batch x embedding_dim
+
+        dec_state = self.state["hidden"]
+        coverage = self.state["coverage"].squeeze(0) \
+            if self.state["coverage"] is not None else None
+
+        # Input feed concatenates hidden state with
+        # input at every time step.
+        for emb_t in emb.split(1):
+            decoder_input = torch.cat([emb_t.squeeze(0), input_feed], 1)
+            rnn_output, dec_state = self.rnn(decoder_input, dec_state)
+            if self.attentional:
+                decoder_output, p_attn = self.attn(
+                    rnn_output,
+                    memory_bank.transpose(0, 1),
+                    memory_lengths=memory_lengths)
+                attns["std"].append(p_attn)
+            else:
+                decoder_output = rnn_output
+            if self.context_gate is not None:
+                # TODO: context gate should be employed
+                # instead of second RNN transform.
+                decoder_output = self.context_gate(
+                    decoder_input, rnn_output, decoder_output
+                )
+            decoder_output = self.dropout(decoder_output)
+            input_feed = decoder_output
+
+            dec_outs += [decoder_output]
+
+            # Update the coverage attention.
+            if self._coverage:
+                coverage = p_attn if coverage is None else p_attn + coverage
+                attns["coverage"] += [coverage]
+
+            if self.copy_attn is not None:
+                _, copy_attn = self.copy_attn(
+                    decoder_output, memory_bank.transpose(0, 1))
+                attns["copy"] += [copy_attn]
+            elif self._reuse_copy_attn:
+                attns["copy"] = attns["std"]
+
+        return dec_state, dec_outs, attns
+
+    def _build_rnn(self, rnn_type, input_size,
+                   hidden_size, num_layers, dropout):
+        assert rnn_type != "SRU", "SRU doesn't support input feed! " \
+                                  "Please set -input_feed 0!"
+        stacked_cell = StackedLSTM if rnn_type == "LSTM" else StackedGRU
+        return stacked_cell(num_layers, input_size, hidden_size, dropout)
+
+    @property
+    def _input_size(self):
+        """Using input feed by concatenating input with attention vectors."""
+        return self.embeddings.embedding_size + self.hidden_size
+
+    def update_dropout(self, dropout):
+        self.dropout.p = dropout
+        self.rnn.dropout.p = dropout
+        self.embeddings.update_dropout(dropout)
+
+
 class CombinedTransformerRnnDecoder(DecoderBase):
     """The Transformer decoder from "Attention is All You Need".
     :cite:`DBLP:journals/corr/VaswaniSPUJGKP17`
@@ -191,11 +357,11 @@ class CombinedTransformerRnnDecoder(DecoderBase):
         # Decoder State
         self.state = {}
 
-        self.lstm_layer = self._build_rnn("LSTM",
-                                          input_size=d_model,
-                                          hidden_size=d_model,
-                                          num_layers=1,
-                                          dropout=dropout)
+        self.feedRnnDecoder = InputFeedRNNDecoder2("LSTM", bidirectional_encoder=False, num_layers = 1,
+                                               hidden_size = d_model, attn_type="general", attn_func="softmax",
+                                               copy_attn=False, dropout=0.3, embeddings=EmbeddingSkipped(d_model),
+                                               reuse_copy_attn=False, copy_attn_type="general")
+        self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
 
         self.transformer_layers = nn.ModuleList(
             [CombinedTransformerRnnDecoderLayer(d_model, heads, d_ff, dropout,
@@ -213,10 +379,6 @@ class CombinedTransformerRnnDecoder(DecoderBase):
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
 
         self.alignment_layer = alignment_layer
-
-    def _build_rnn(self, rnn_type, **kwargs):
-        rnn, _ = rnn_factory(rnn_type, **kwargs)
-        return rnn
 
     @classmethod
     def from_opt(cls, opt, embeddings):
@@ -295,7 +457,7 @@ class CombinedTransformerRnnDecoder(DecoderBase):
             if attn_align is not None:
                 attn_aligns.append(attn_align)
 
-        output, _ = self.lstm_layer(output.transpose(0, 1))
+        output, _ = self.feedRnnDecoder(output, memory_bank, step=step, **kwargs)
         output = output.transpose(0,1)
 
         output = self.layer_norm(output)
