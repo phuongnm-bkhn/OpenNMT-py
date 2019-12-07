@@ -42,6 +42,13 @@ class CombinedTransformerRnnDecoderLayer(nn.Module):
 
         self.context_attn = MultiHeadedAttention(
             heads, d_model, dropout=attention_dropout)
+
+        self.state = {}
+        self.feedRnnDecoder = InputFeedRNNDecoder2("LSTM", bidirectional_encoder=False, num_layers = 1,
+                                                   hidden_size=d_model, attn_type="none",
+                                                   copy_attn=False, dropout=0.01, embeddings=EmbeddingSkipped(d_model),
+                                                   reuse_copy_attn=False, copy_attn_type="none")
+
         self.feed_forward = PositionwiseFeedForward(d_model, d_ff, dropout)
         self.layer_norm_1 = nn.LayerNorm(d_model, eps=1e-6)
         self.layer_norm_2 = nn.LayerNorm(d_model, eps=1e-6)
@@ -138,6 +145,9 @@ class CombinedTransformerRnnDecoderLayer(nn.Module):
                                        mask=src_pad_mask,
                                        layer_cache=layer_cache,
                                        attn_type="context")
+        mid = self.feedRnnDecoder(mid, memory_bank.transpose(0,1), step=step)
+        mid = mid.transpose(0, 1)
+
         output = self.feed_forward(self.drop(mid) + query)
 
         return output, attns
@@ -193,20 +203,15 @@ class InputFeedRNNDecoder2(RNNDecoderBase):
 
             * dec_outs: output from the decoder (after attn)
               ``(tgt_len, batch, hidden)``.
-            * attns: distribution over src at each tgt
-              ``(tgt_len, batch, src_len)``.
         """
 
-        dec_state, dec_outs, attns = self._run_forward_pass(transform_emb, memory_bank, memory_lengths)
+        dec_state, dec_outs  = self._run_forward_pass(transform_emb, memory_bank, memory_lengths)
 
         # Update the state with the result.
         if not isinstance(dec_state, tuple):
             dec_state = (dec_state,)
         self.state["hidden"] = dec_state
         self.state["input_feed"] = dec_outs[-1].unsqueeze(0)
-        self.state["coverage"] = None
-        if "coverage" in attns:
-            self.state["coverage"] = attns["coverage"][-1].unsqueeze(0)
 
         # Concatenates sequence of tensors along a new dimension.
         # NOTE: v0.3 to 0.4: dec_outs / attns[*] may not be list
@@ -216,10 +221,7 @@ class InputFeedRNNDecoder2(RNNDecoderBase):
         if type(dec_outs) == list:
             dec_outs = torch.stack(dec_outs)
 
-            for k in attns:
-                if type(attns[k]) == list:
-                    attns[k] = torch.stack(attns[k])
-        return dec_outs, attns
+        return dec_outs
 
     def _run_forward_pass(self, transform_emb, memory_bank, memory_lengths=None):
         """
@@ -244,58 +246,24 @@ class InputFeedRNNDecoder2(RNNDecoderBase):
         # END Additional args check.
 
         dec_outs = []
-        attns = {}
-        if self.attn is not None:
-            attns["std"] = []
-        if self.copy_attn is not None or self._reuse_copy_attn:
-            attns["copy"] = []
-        if self._coverage:
-            attns["coverage"] = []
 
         emb = transform_emb.transpose(0,1)
         assert emb.dim() == 3  # len x batch x embedding_dim
 
         dec_state = self.state["hidden"]
-        coverage = self.state["coverage"].squeeze(0) \
-            if self.state["coverage"] is not None else None
 
         # Input feed concatenates hidden state with
         # input at every time step.
         for emb_t in emb.split(1):
             decoder_input = torch.cat([emb_t.squeeze(0), input_feed], 1)
             rnn_output, dec_state = self.rnn(decoder_input, dec_state)
-            if self.attentional:
-                decoder_output, p_attn = self.attn(
-                    rnn_output,
-                    memory_bank.transpose(0, 1),
-                    memory_lengths=memory_lengths)
-                attns["std"].append(p_attn)
-            else:
-                decoder_output = rnn_output
-            if self.context_gate is not None:
-                # TODO: context gate should be employed
-                # instead of second RNN transform.
-                decoder_output = self.context_gate(
-                    decoder_input, rnn_output, decoder_output
-                )
-            decoder_output = self.dropout(decoder_output)
-            input_feed = decoder_output
 
+            decoder_output = rnn_output
+            # decoder_output = self.dropout(decoder_output)
+            input_feed = decoder_output
             dec_outs += [decoder_output]
 
-            # Update the coverage attention.
-            if self._coverage:
-                coverage = p_attn if coverage is None else p_attn + coverage
-                attns["coverage"] += [coverage]
-
-            if self.copy_attn is not None:
-                _, copy_attn = self.copy_attn(
-                    decoder_output, memory_bank.transpose(0, 1))
-                attns["copy"] += [copy_attn]
-            elif self._reuse_copy_attn:
-                attns["copy"] = attns["std"]
-
-        return dec_state, dec_outs, attns
+        return dec_state, dec_outs
 
     def _build_rnn(self, rnn_type, input_size,
                    hidden_size, num_layers, dropout):
@@ -357,10 +325,6 @@ class CombinedTransformerRnnDecoder(DecoderBase):
         # Decoder State
         self.state = {}
 
-        self.feedRnnDecoder = InputFeedRNNDecoder2("LSTM", bidirectional_encoder=False, num_layers = 1,
-                                               hidden_size = d_model, attn_type="general", attn_func="softmax",
-                                               copy_attn=False, dropout=0.3, embeddings=EmbeddingSkipped(d_model),
-                                               reuse_copy_attn=False, copy_attn_type="general")
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
 
         self.transformer_layers = nn.ModuleList(
@@ -456,9 +420,6 @@ class CombinedTransformerRnnDecoder(DecoderBase):
                 with_align=with_align)
             if attn_align is not None:
                 attn_aligns.append(attn_align)
-
-        output, _ = self.feedRnnDecoder(output, memory_bank, step=step, **kwargs)
-        output = output.transpose(0,1)
 
         output = self.layer_norm(output)
         dec_outs = output.transpose(0, 1).contiguous()
