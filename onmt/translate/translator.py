@@ -327,7 +327,8 @@ class Translator(object):
             batch_type="sents",
             attn_debug=False,
             align_debug=False,
-            phrase_table=""):
+            phrase_table="",
+            marking_condition=None):
         """Translate content of ``src`` and get gold scores from ``tgt``.
 
         Args:
@@ -358,7 +359,7 @@ class Translator(object):
         data = inputters.Dataset(
             self.fields, readers=_readers, data=_data, dirs=_dir,
             sort_key=inputters.str2sortkey[self.data_type],
-            filter_pred=self._filter_pred
+            filter_pred=self._filter_pred, marking_condition=marking_condition
         )
 
         data_iter = inputters.OrderedIterator(

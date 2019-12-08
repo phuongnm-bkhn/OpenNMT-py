@@ -754,6 +754,8 @@ def translate_opts(parser):
               help="Using grayscale image can training "
                    "model faster and smaller")
 
+    group.add('--marking_condition', '-marking_condition', type=str, default="*",
+              help="regex filter marking token.")
 
 # Copyright 2016 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
