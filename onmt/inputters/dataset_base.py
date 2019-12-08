@@ -1,5 +1,7 @@
 # coding: utf-8
-
+import logging
+import re
+import copy
 from itertools import chain, starmap
 from collections import Counter
 
@@ -108,9 +110,20 @@ class Dataset(TorchtextDataset):
     """
 
     def __init__(self, fields, readers, data, dirs, sort_key,
-                 filter_pred=None):
+                 filter_pred=None, marking_condition=None):
         self.sort_key = sort_key
+        self.marking_condition = marking_condition
         can_copy = 'src_map' in fields and 'alignment' in fields
+
+        count_sample = len(data[0][1])
+        transformed_data = []
+        for i in range(count_sample):
+            src_str, tgt_str = data[0][1][i], data[1][1][i]
+            encode_words, decode_words, decode_transformed, encode_labels = \
+                Dataset.matching_enc_label(src_str.decode("utf-8") , tgt_str.decode("utf-8"), marking_condition)
+            data[1][1][i] = (" ".join(decode_transformed)).encode('utf-8')
+            data[0][1][i] = (" ".join(encode_words)).encode('utf-8')
+            transformed_data.append((encode_words, decode_words, decode_transformed, encode_labels))
 
         read_iters = [r.read(dat[1], dat[0], dir_) for r, dat, dir_
                       in zip(readers, data, dirs)]
@@ -132,10 +145,17 @@ class Dataset(TorchtextDataset):
             examples.append(ex)
 
         # fields needs to have only keys that examples have as attrs
+        org_fields = fields
         fields = []
         for _, nf_list in ex_fields.items():
             assert len(nf_list) == 1
             fields.append(nf_list[0])
+        for k in org_fields:
+            if k not in ex_fields:
+                fields.append((k, org_fields[k]))
+
+        for sample in examples:
+            setattr(sample, 'src_label', [transformed_data[sample.indices][3]])
 
         super(Dataset, self).__init__(examples, fields, filter_pred)
 
@@ -162,3 +182,46 @@ class Dataset(TorchtextDataset):
                 data.append((name, field["data"]))
                 dirs.append(field["dir"])
         return readers, data, dirs
+
+    def matching_enc_label(encode_str: str, decode_str: str, marking_condition=None):
+        encode_str = encode_str.strip()
+        decode_str = decode_str.strip()
+
+
+        encode_words = encode_str.split()
+        encode_labels = ["O"] * len(encode_words)
+        decode_words = decode_str.split()
+        w_intersection = set(encode_words).intersection(set(decode_words))
+
+        if marking_condition is not None:
+            w_intersection2 = copy.deepcopy(w_intersection)
+            for w in w_intersection2:
+                if not re.match(marking_condition, w):
+                    w_intersection.remove(w)
+
+        last_idx = -1
+        elements = []
+        for i, w in enumerate(encode_words + ["#<end>"]):
+            if w in w_intersection:
+                if i - last_idx == 1 and last_idx != -1 and (elements[-1] + " " + w) in decode_str:
+                    elements[-1] += " " + w
+                    encode_labels[i] = "I-arg_{}:lb".format(len(elements))
+                else:
+                    elements.append(w)
+                    encode_labels[i] = "B-arg_{}:lb".format(len(elements))
+                last_idx = i
+            else:
+                last_idx = -1
+        for i, e_val in enumerate(elements):
+            term_search = re.compile("( |^){}( |$)".format(e_val.replace("+","\+")))
+            if term_search.search(decode_str) is not None:
+                decode_str = term_search.sub('\\1arg_{}:lb\\2'.format(i + 1), decode_str, count=1)
+            else:
+                logging.warning("- [W] {} not exist in decode_str {}".format(e_val, decode_str))
+
+        # valid check with simple rules for
+        # if len(elements) == 0 and "id" in decode_str:
+        #     logging.warning("- [W] id had not replaced exist in \n {} \n {}".format(decode_str, encode_str))
+
+        decode_transformed = decode_str.split()
+        return encode_words, decode_words, decode_transformed, encode_labels

@@ -56,9 +56,15 @@ def build_loss_compute(model, tgt_field, opt, train=True):
             lambda_coverage=opt.lambda_coverage
         )
     else:
-        compute = NMTLossCompute(
-            criterion, loss_gen, lambda_coverage=opt.lambda_coverage,
-            lambda_align=opt.lambda_align)
+        # compute = NMTLossCompute(
+        #     criterion, loss_gen, lambda_coverage=opt.lambda_coverage,
+        #     lambda_align=opt.lambda_align)
+        compute = NMTMarkLossCompute(criterion, loss_gen,
+                                     enc_criterion=nn.NLLLoss(ignore_index=padding_idx, reduction='sum'),
+                                     lambda_coverage=opt.lambda_coverage,
+                                     lambda_align=opt.lambda_align,
+                                     enc_generator=model.enc_generator,
+                                     lambda_marking_mechanism=opt.lambda_marking_mechanism)
     compute.to(device)
 
     return compute
@@ -83,7 +89,7 @@ class LossComputeBase(nn.Module):
         normalzation (str): normalize by "sents" or "tokens"
     """
 
-    def __init__(self, criterion, generator):
+    def __init__(self, criterion, generator, enc_criterion=None, enc_generator=None):
         super(LossComputeBase, self).__init__()
         self.criterion = criterion
         self.generator = generator
@@ -314,6 +320,96 @@ class NMTLossCompute(LossComputeBase):
         align_loss = -align_head.clamp(min=1e-18).log().mul(ref_align).sum()
         align_loss *= self.lambda_align
         return align_loss
+
+
+class NMTMarkLossCompute(NMTLossCompute):
+    """
+    Standard NMT Loss Computation.
+    """
+
+    def __init__(self, criterion, generator, normalization="sents",
+                 lambda_coverage=0.0, lambda_align=0.0,
+                 enc_criterion=None, enc_generator=None,
+                 lambda_marking_mechanism=0.5):
+        super(NMTMarkLossCompute, self).__init__(criterion, generator, normalization, lambda_coverage=lambda_coverage,
+                                                 lambda_align=lambda_align)
+        self.enc_criterion = enc_criterion
+        self.enc_generator = enc_generator
+        self.lambda_marking_mechanism = lambda_marking_mechanism
+
+    def _make_shard_state_enc(self, output, range_, target=None):
+        return {
+            "output": output,
+            "target": target[range_[0]: range_[1], :, 0],
+        }
+
+    def __call__(self,
+                 batch,
+                 output,
+                 attns,
+                 normalization=1.0,
+                 shard_size=0,
+                 trunc_start=0,
+                 trunc_size=None,
+                 enc_hiddens=None):
+        """Compute the forward loss, possibly in shards in which case this
+        method also runs the backward pass and returns ``None`` as the loss
+        value.
+
+        Also supports truncated BPTT for long sequences by taking a
+        range in the decoder output sequence to back propagate in.
+        Range is from `(trunc_start, trunc_start + trunc_size)`.
+
+        Note sharding is an exact efficiency trick to relieve memory
+        required for the generation buffers. Truncation is an
+        approximate efficiency trick to relieve the memory required
+        in the RNN buffers.
+
+        Args:
+          batch (batch) : batch of labeled examples
+          output (:obj:`FloatTensor`) :
+              output of decoder model `[tgt_len x batch x hidden]`
+          attns (dict) : dictionary of attention distributions
+              `[tgt_len x batch x src_len]`
+          normalization: Optional normalization factor.
+          shard_size (int) : maximum number of examples in a shard
+          trunc_start (int) : starting position of truncation window
+          trunc_size (int) : length of truncation window
+
+        Returns:
+            A tuple with the loss and a :obj:`onmt.utils.Statistics` instance.
+        """
+
+        # loss for decoder
+        total_loss = []
+        trunc_size = batch.tgt.size(0) - trunc_start
+        trunc_range = (trunc_start, trunc_start + trunc_size)
+        shard_state = self._make_shard_state(batch, output, trunc_range, attns)
+        batch_stats = onmt.utils.Statistics()
+        loss, stats = self._compute_loss(batch, **shard_state)
+        total_loss.append((1-self.lambda_marking_mechanism)*loss)
+        batch_stats.update(stats)
+
+        # loss for encoder
+        trunc_size = batch.src[0].size(0) - trunc_start
+        trunc_range = (trunc_start, trunc_start + trunc_size)
+        shard_state = self._make_shard_state_enc(enc_hiddens, trunc_range, batch.src_label)
+        loss, stats = self._compute_loss_enc(**shard_state)
+        total_loss.append(self.lambda_marking_mechanism * loss)
+        batch_stats.update(stats)
+
+        return sum(total_loss).div(float(normalization)), batch_stats
+
+    def _compute_loss_enc(self, output, target):
+        bottled_output = self._bottle(output)
+
+        scores = self.enc_generator(bottled_output)
+        gtruth = target.view(-1)
+
+        loss = self.enc_criterion(scores, gtruth)
+        stats = self._stats(loss.clone(), scores, gtruth)
+
+        return loss, stats
 
 
 def filter_shard_state(state, shard_size=None):

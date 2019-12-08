@@ -5,7 +5,7 @@ e.g., from a line of text to a sequence of embeddings.
 """
 from onmt.inputters.inputter import \
     load_old_vocab, get_fields, OrderedIterator, \
-    build_vocab, old_style_vocab, filter_example
+    build_vocab, old_style_vocab, filter_example, build_vocab_src_label
 from onmt.inputters.dataset_base import Dataset
 from onmt.inputters.text_dataset import text_sort_key, TextDataReader
 from onmt.inputters.image_dataset import img_sort_key, ImageDataReader

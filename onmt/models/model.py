@@ -49,7 +49,7 @@ class NMTModel(nn.Module):
         dec_out, attns = self.decoder(dec_in, memory_bank,
                                       memory_lengths=lengths,
                                       with_align=with_align)
-        return dec_out, attns
+        return dec_out, attns, memory_bank
 
     def update_dropout(self, dropout):
         self.encoder.update_dropout(dropout)

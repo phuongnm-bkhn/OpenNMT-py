@@ -63,12 +63,15 @@ class TranslationBuilder(object):
                len(translation_batch["predictions"]))
         batch_size = batch.batch_size
 
-        preds, pred_score, attn, align, gold_score, indices = list(zip(
+        # preds, pred_score, attn, align, gold_score, indices = list(zip(
+        preds, pred_score, attn, align, gold_score, enc_label, enc_label_gold, indices = list(zip(
             *sorted(zip(translation_batch["predictions"],
                         translation_batch["scores"],
                         translation_batch["attention"],
                         translation_batch["alignment"],
                         translation_batch["gold_score"],
+                        translation_batch.get("enc_label"),
+                        translation_batch.get("enc_label_gold"),
                         batch.indices.data),
                     key=lambda x: x[-1])))
 
@@ -104,11 +107,19 @@ class TranslationBuilder(object):
                     src[:, b] if src is not None else None,
                     src_vocab, src_raw,
                     tgt[1:, b] if tgt is not None else None, None)
+            src_label = None
+            src_label_gold = None
+            if enc_label is not None:
+                enc_label_vocab = self.fields["src_label"].base_field.vocab
+                src_label = [enc_label_vocab.itos[w_id] for w_id in enc_label[b]]
+                src_label_gold = [enc_label_vocab.itos[w_id] for w_id in enc_label_gold[b]]
 
             translation = Translation(
                 src[:, b] if src is not None else None,
                 src_raw, pred_sents, attn[b], pred_score[b],
-                gold_sent, gold_score[b], align[b]
+                gold_sent, gold_score[b], align[b],
+                src_label=src_label,
+                src_label_gold=src_label_gold,
             )
             translations.append(translation)
 
@@ -131,11 +142,11 @@ class Translation(object):
             each translation.
     """
 
-    __slots__ = ["src", "src_raw", "pred_sents", "attns", "pred_scores",
+    __slots__ = ["src", "src_raw",  "src_label", "src_label_gold", "pred_sents", "attns", "pred_scores",
                  "gold_sent", "gold_score", "word_aligns"]
 
     def __init__(self, src, src_raw, pred_sents,
-                 attn, pred_scores, tgt_sent, gold_score, word_aligns):
+                 attn, pred_scores, tgt_sent, gold_score, word_aligns, src_label=None, src_label_gold=None):
         self.src = src
         self.src_raw = src_raw
         self.pred_sents = pred_sents
@@ -144,6 +155,8 @@ class Translation(object):
         self.gold_sent = tgt_sent
         self.gold_score = gold_score
         self.word_aligns = word_aligns
+        self.src_label = src_label
+        self.src_label_gold = src_label_gold
 
     def log(self, sent_number):
         """
@@ -168,6 +181,12 @@ class Translation(object):
             tgt_sent = ' '.join(self.gold_sent)
             msg.append('GOLD {}: {}\n'.format(sent_number, tgt_sent))
             msg.append(("GOLD SCORE: {:.4f}\n".format(self.gold_score)))
+        if self.src_label is not None:
+            src_label = ' '.join(self.src_label)
+            msg.append('SENT LABEL PRED {}: {}\n'.format(sent_number, src_label))
+        if self.src_label_gold is not None:
+            src_label_gold = ' '.join(self.src_label_gold)
+            msg.append('SENT LABEL GOLD {}: {}\n'.format(sent_number, src_label_gold))
         if len(self.pred_sents) > 1:
             msg.append('\nBEST HYP:\n')
             for score, sent in zip(self.pred_scores, self.pred_sents):

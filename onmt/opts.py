@@ -200,6 +200,8 @@ def model_opts(parser):
               choices=["O0", "O1", "O2", "O3"],
               help="For FP16 training, the opt_level to use."
                    "See https://nvidia.github.io/apex/amp.html#opt-levels.")
+    group.add('--lambda_marking_mechanism', '-lambda_marking_mechanism', type=float, default=0.5,
+              help="lambda to adjust error rate between source and target label.")
 
 
 def preprocess_opts(parser):
@@ -243,6 +245,8 @@ def preprocess_opts(parser):
                    "shard_size=0 means no segmentation "
                    "shard_size>0 means segment dataset into multiple shards, "
                    "each shard has shard_size samples")
+    group.add('--marking_condition', '-marking_condition', type=str, default=None,
+              help="pattern to match label in marking step")
 
     group.add('--num_threads', '-num_threads', type=int, default=1,
               help="Number of shards to build in parallel.")

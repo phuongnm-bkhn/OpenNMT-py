@@ -314,11 +314,10 @@ class Trainer(object):
                 tgt = batch.tgt
 
                 # F-prop through the model.
-                outputs, attns = valid_model(src, tgt, src_lengths,
-                                             with_align=self.with_align)
+                outputs, attns, enc_hiddens = valid_model(src, tgt, src_lengths, with_align=self.with_align)
 
                 # Compute loss.
-                _, batch_stats = self.valid_loss(batch, outputs, attns)
+                _, batch_stats = self.valid_loss(batch, outputs, attns, enc_hiddens=enc_hiddens)
 
                 # Update statistics.
                 stats.update(batch_stats)
@@ -361,12 +360,20 @@ class Trainer(object):
                 if self.accum_count == 1:
                     self.optim.zero_grad()
 
-                outputs, attns = self.model(src, tgt, src_lengths, bptt=bptt,
-                                            with_align=self.with_align)
+                outputs, attns, enc_hiddens = self.model(src, tgt, src_lengths, bptt=bptt,
+                                                         with_align=self.with_align)
                 bptt = True
 
                 # 3. Compute loss.
                 try:
+                    # loss, batch_stats = self.train_loss(
+                    #     batch,
+                    #     outputs,
+                    #     attns,
+                    #     normalization=normalization,
+                    #     shard_size=self.shard_size,
+                    #     trunc_start=j,
+                    #     trunc_size=trunc_size)
                     loss, batch_stats = self.train_loss(
                         batch,
                         outputs,
@@ -374,7 +381,8 @@ class Trainer(object):
                         normalization=normalization,
                         shard_size=self.shard_size,
                         trunc_start=j,
-                        trunc_size=trunc_size)
+                        trunc_size=trunc_size,
+                        enc_hiddens=enc_hiddens)
 
                     if loss is not None:
                         self.optim.backward(loss)

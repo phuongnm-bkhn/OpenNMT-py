@@ -1,7 +1,3 @@
-"""
-Implementation of "Attention is All You Need"
-"""
-
 import torch.nn as nn
 
 from onmt.encoders.encoder import EncoderBase

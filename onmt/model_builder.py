@@ -172,6 +172,18 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
     model = onmt.models.NMTModel(encoder, decoder)
 
     # Build Generator.
+
+    # add encode generator: to predict label of encoder
+    count_len_encode_label = len(fields["src_label"].fields[0][1].vocab.itos) # count label = 2*N + 1 with N == count(arg_id)
+    gen_func_encode = nn.LogSoftmax(dim=-1) #TODO: setting for softmax/CRF layer
+    enc_generator = nn.Sequential(
+        nn.Linear(model_opt.enc_rnn_size,
+                  count_len_encode_label),
+        Cast(torch.float32),
+        gen_func_encode
+    )
+
+    # decode generator
     if not model_opt.copy_attn:
         if model_opt.generator_function == "sparsemax":
             gen_func = onmt.modules.sparse_activations.LogSparsemax(dim=-1)
@@ -207,6 +219,10 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
 
         model.load_state_dict(checkpoint['model'], strict=False)
         generator.load_state_dict(checkpoint['generator'], strict=False)
+        if "enc_generator" in checkpoint:
+            enc_generator.load_state_dict(checkpoint['enc_generator'], strict=False)
+        else:
+            logger.warning("[W] not \"enc_generator\" in checkpoint")
     else:
         if model_opt.param_init != 0.0:
             for p in model.parameters():
@@ -229,6 +245,11 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
                 model_opt.pre_word_vecs_dec)
 
     model.generator = generator
+
+    # custom by phuongnm
+    if "src_label" in fields:
+        model.enc_generator = enc_generator
+
     model.to(device)
     if model_opt.model_dtype == 'fp16' and model_opt.optim == 'fusedadam':
         model.half()
