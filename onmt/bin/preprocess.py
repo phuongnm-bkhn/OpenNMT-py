@@ -61,7 +61,7 @@ def process_one_shard(corpus_params, params):
     dataset = inputters.Dataset(
         fields, readers=_readers, data=_data, dirs=_dir,
         sort_key=inputters.str2sortkey[opt.data_type],
-        filter_pred=filter_pred
+        filter_pred=filter_pred, marking_condition=opt.marking_condition
     )
     if corpus_type == "train" and existing_fields is None:
         for ex in dataset.examples:

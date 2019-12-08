@@ -202,7 +202,8 @@ def model_opts(parser):
                    "See https://nvidia.github.io/apex/amp.html#opt-levels.")
     group.add('--lambda_marking_mechanism', '-lambda_marking_mechanism', type=float, default=0.5,
               help="lambda to adjust error rate between source and target label.")
-
+    group.add('--marking_condition', '-marking_condition', type=str, default="*",
+              help="regex filter marking token.")
 
 def preprocess_opts(parser):
     """ Pre-procesing options """

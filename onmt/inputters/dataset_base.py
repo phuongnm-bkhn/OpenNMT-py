@@ -196,7 +196,7 @@ class Dataset(TorchtextDataset):
         if marking_condition is not None:
             w_intersection2 = copy.deepcopy(w_intersection)
             for w in w_intersection2:
-                if not re.match(marking_condition, w):
+                if not re.match(re.compile(marking_condition), w):
                     w_intersection.remove(w)
 
         last_idx = -1
