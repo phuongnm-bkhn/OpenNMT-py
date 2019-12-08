@@ -389,6 +389,15 @@ def _build_fields_vocab(fields, counters, data_type, share_vocab,
             counters,
             build_fv_args,
             size_multiple=vocab_size_multiple if not share_vocab else 1)
+        if "src_label" in fields:
+            build_fv_args["src_label"] = dict(
+                max_size=src_vocab_size, min_freq=src_words_min_frequency)
+            src_label_multifield = fields["src_label"]
+            _build_fv_from_multifield(
+                src_label_multifield,
+                counters,
+                build_fv_args,
+                size_multiple=1)
         if share_vocab:
             # `tgt_vocab_size` is ignored when sharing vocabularies
             logger.info(" * merging src and tgt vocab...")

@@ -174,7 +174,7 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
     # Build Generator.
 
     # add encode generator: to predict label of encoder
-    count_len_encode_label = len(fields["src_label"].fields[0][1].vocab.itos) # count label = 2*N + 1 with N == count(arg_id)
+    count_len_encode_label = len(fields["src_label"].base_field.vocab) # count label = 2*N + 1 with N == count(arg_id)
     gen_func_encode = nn.LogSoftmax(dim=-1) #TODO: setting for softmax/CRF layer
     enc_generator = nn.Sequential(
         nn.Linear(model_opt.enc_rnn_size,
