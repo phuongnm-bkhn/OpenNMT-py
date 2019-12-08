@@ -5,6 +5,7 @@ from torch.nn.utils.rnn import pad_packed_sequence as unpack
 
 from onmt.encoders.rnn_encoder import RNNEncoder
 from onmt.modules import MultiHeadedAttention
+from onmt.modules.position_ffn import PositionwiseFeedForward
 from onmt.utils.misc import sequence_mask
 
 
@@ -30,9 +31,13 @@ class RNNSelfAttentionEncoder(RNNEncoder):
 
         self.layer_norm = nn.LayerNorm(hidden_size, eps=1e-6)
 
+        self.self_attn_dropout = 0.1
         self.self_attn = MultiHeadedAttention(
-            head_count=8, model_dim=hidden_size, dropout=dropout,
+            head_count=8, model_dim=hidden_size, dropout=self.self_attn_dropout,
             max_relative_positions=0)
+        self.feed_forward = PositionwiseFeedForward(hidden_size, 2048, self.self_attn_dropout)
+        self.layer_norm = nn.LayerNorm(hidden_size, eps=1e-6)
+        self.dropout = nn.Dropout(self.self_attn_dropout)
 
     def forward(self, src, lengths=None):
         """See :func:`EncoderBase.forward()`"""
@@ -41,11 +46,14 @@ class RNNSelfAttentionEncoder(RNNEncoder):
         emb = self.embeddings(src)
         # s_len, batch, emb_dim = emb.size()
 
+        inputs = emb.transpose(0, 1)
         mask = ~sequence_mask(lengths).unsqueeze(1)
-        input_norm = self.layer_norm(emb.transpose(0, 1))
+        input_norm = self.layer_norm(inputs)
         context, _self_attn = self.self_attn(input_norm, input_norm, input_norm,
                                     mask=mask, attn_type="self")
-        emb = context.transpose(0, 1)
+        out = self.dropout(context) + inputs
+        out = self.feed_forward(out)
+        emb = out.transpose(0, 1)
 
         packed_emb = emb
         if lengths is not None and not self.no_pack_padded_seq:
