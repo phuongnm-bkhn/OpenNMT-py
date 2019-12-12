@@ -298,7 +298,8 @@ class Translator(object):
             attn_debug=False,
             align_debug=False,
             phrase_table="",
-            self_attn_debug=False):
+            self_attn_debug=False,
+            self_attn_folder_save="./"):
         """Translate content of ``src`` and get gold scores from ``tgt``.
 
         Args:
@@ -419,15 +420,17 @@ class Translator(object):
                     self_attn_data = trans.self_attn[:, :, :len(trans.src_raw), :len(trans.src_raw)]
 
                     fig, axs = plt.subplots(self_attn_data.size(0), self_attn_data.size(1), figsize=(50, 10))
+                    fig.suptitle('Self attention Sentence {}'.format(sent_number), fontsize=14)
                     for layer in range(0, self_attn_data.size(0)):
                         for h in range(self_attn_data.size(1)):
                             draw(self_attn_data[layer][h],
                                  srcs if layer == self_attn_data.size(0) - 1 else [], srcs if h == 0 else [], ax=axs[layer][h])
-                    if not os.path.isdir("self-attn-debug"):
-                        os.mkdir("self-attn-debug/")
-                    plt.savefig('self-attn-debug/sent-{}.pdf'.format(sent_number),
-                                bbox_inches = 'tight',
-                                pad_inches = 0)
+
+                    if not os.path.isdir("{}/self-attn-debug".format(self_attn_folder_save)):
+                        os.mkdir("{}/self-attn-debug".format(self_attn_folder_save))
+                    plt.savefig('{}/self-attn-debug/sent-{}.pdf'.format(self_attn_folder_save, sent_number),
+                        bbox_inches='tight',
+                        pad_inches=0)
                     plt.close()
 
 
