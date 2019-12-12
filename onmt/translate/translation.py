@@ -108,7 +108,9 @@ class TranslationBuilder(object):
             translation = Translation(
                 src[:, b] if src is not None else None,
                 src_raw, pred_sents, attn[b], pred_score[b],
-                gold_sent, gold_score[b], align[b]
+                gold_sent, gold_score[b], align[b],
+                self_attn=translation_batch.get("self-attn")[b]
+                if "self-attn" in translation_batch else None
             )
             translations.append(translation)
 
@@ -132,10 +134,10 @@ class Translation(object):
     """
 
     __slots__ = ["src", "src_raw", "pred_sents", "attns", "pred_scores",
-                 "gold_sent", "gold_score", "word_aligns"]
+                 "gold_sent", "gold_score", "word_aligns", "self_attn"]
 
     def __init__(self, src, src_raw, pred_sents,
-                 attn, pred_scores, tgt_sent, gold_score, word_aligns):
+                 attn, pred_scores, tgt_sent, gold_score, word_aligns, self_attn=None):
         self.src = src
         self.src_raw = src_raw
         self.pred_sents = pred_sents
@@ -144,6 +146,7 @@ class Translation(object):
         self.gold_sent = tgt_sent
         self.gold_score = gold_score
         self.word_aligns = word_aligns
+        self.self_attn = self_attn
 
     def log(self, sent_number):
         """
