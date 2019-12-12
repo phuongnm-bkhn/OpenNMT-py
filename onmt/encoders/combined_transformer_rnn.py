@@ -67,6 +67,9 @@ class CombinedTransformerRnnEncoderLayer(nn.Module):
         self.feed_forward.update_dropout(dropout)
         self.dropout.p = dropout
 
+    def clean_self_attn_data(self):
+        self.self_attn_data = None
+
 
 class EmbeddingSkipped(nn.Module):
     def __init__(self, embedding_size):
