@@ -419,7 +419,7 @@ class Translator(object):
                         srcs = trans.src_raw
                     self_attn_data = trans.self_attn[:, :, :len(trans.src_raw), :len(trans.src_raw)]
 
-                    fig, axs = plt.subplots(self_attn_data.size(0), self_attn_data.size(1), figsize=(50, 10))
+                    fig, axs = plt.subplots(self_attn_data.size(0), self_attn_data.size(1), figsize=(30, 6))
                     fig.suptitle('Self attention Sentence {}'.format(sent_number), fontsize=14)
                     for layer in range(0, self_attn_data.size(0)):
                         for h in range(self_attn_data.size(1)):
