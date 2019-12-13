@@ -168,7 +168,7 @@ class LossComputeBase(nn.Module):
             batch_stats.update(stats)
         return None, batch_stats
 
-    def _stats(self, loss, scores, target):
+    def _stats(self, loss, scores, target, batch_size=None):
         """
         Args:
             loss (:obj:`FloatTensor`): the loss computed by the loss criterion.
@@ -182,7 +182,31 @@ class LossComputeBase(nn.Module):
         non_padding = target.ne(self.padding_idx)
         num_correct = pred.eq(target).masked_select(non_padding).sum().item()
         num_non_padding = non_padding.sum().item()
-        return onmt.utils.Statistics(loss.item(), num_non_padding, num_correct)
+
+        # calculate the precision sentence level
+        count_sent_correct = 0
+        count_sent = 0
+        if batch_size is not None:
+            result_with_batch = pred.eq(target).view(-1, batch_size)
+            non_padding_batch = target.ne(self.padding_idx).view(-1, batch_size)
+            for sent_i in range(batch_size):
+                flag_sent_right = True
+                for i_w in range(result_with_batch.size(0)):
+                    if non_padding_batch[i_w][sent_i]:
+                        count_sent += 1
+                        break
+                for i_w in range(result_with_batch.size(0)):
+                    if non_padding_batch[i_w][sent_i]:
+                        if not result_with_batch[i_w][sent_i]:
+                            flag_sent_right = False
+                            break
+                    else:
+                        break
+                if flag_sent_right:
+                    count_sent_correct += 1
+
+        return onmt.utils.Statistics(loss.item(), num_non_padding, num_correct, count_sent_correct=count_sent_correct,
+                                     count_sent=count_sent)
 
     def _bottle(self, _v):
         return _v.view(-1, _v.size(2))
@@ -296,7 +320,7 @@ class NMTLossCompute(LossComputeBase):
             align_loss = self._compute_alignement_loss(
                 align_head=align_head, ref_align=ref_align)
             loss += align_loss
-        stats = self._stats(loss.clone(), scores, gtruth)
+        stats = self._stats(loss.clone(), scores, gtruth, target.size(1))
 
         return loss, stats
 
