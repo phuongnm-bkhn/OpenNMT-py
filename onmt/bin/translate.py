@@ -29,6 +29,8 @@ def translate(opt):
             batch_size=opt.batch_size,
             batch_type=opt.batch_type,
             attn_debug=opt.attn_debug,
+            self_attn_debug=opt.self_attn_debug,
+            self_attn_folder_save="/".join(opt.src.split("/")[:-1]),
             align_debug=opt.align_debug
             )
 
