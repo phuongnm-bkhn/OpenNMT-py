@@ -700,6 +700,8 @@ class Translator(object):
                 self_attn_data.append(layer_tf.self_attn_data)
             self_attn_data = torch.stack(self_attn_data)
             self_attn_data = self_attn_data.transpose(0, 1)
+            for layer_tf in self.model.encoder.transformer:
+                layer_tf.clean_self_attn_data()
         self.model.decoder.init_state(src, memory_bank, enc_states)
 
         results = {
