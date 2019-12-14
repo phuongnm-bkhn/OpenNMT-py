@@ -71,6 +71,21 @@ class ModelSaverBase(object):
                 self._rm_checkpoint(todel)
             self.checkpoint_queue.append(chkpt_name)
 
+    def save_best(self, step=0, moving_average=None):
+        """ Only save model with the best performance that determine by early stopping
+        set step => 0
+        """
+
+        save_model = self.model
+
+        if moving_average:
+            model_params_data = []
+            for avg, param in zip(moving_average, save_model.parameters()):
+                model_params_data.append(param.data)
+                param.data = avg.data
+        logger.info("Saving best checkpoint %s_step_%d.pt" % (self.base_path, step))
+        return self._save(0, save_model)
+
     def _save(self, step):
         """Save a resumable checkpoint.
 
@@ -136,8 +151,8 @@ class ModelSaver(ModelSaverBase):
         if enc_generator_state_dict is not None:
             checkpoint['enc_generator'] = enc_generator_state_dict
 
-        logger.info("Saving checkpoint %s_best.pt" % (self.base_path))
-        checkpoint_path = '%s_best.pt' % (self.base_path)
+        logger.info("Saving checkpoint %s_step_%d.pt" % (self.base_path, step))
+        checkpoint_path = '%s_step_%d.pt' % (self.base_path, step)
         torch.save(checkpoint, checkpoint_path)
         return checkpoint, checkpoint_path
 

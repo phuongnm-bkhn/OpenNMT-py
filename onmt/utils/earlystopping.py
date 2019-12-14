@@ -60,7 +60,22 @@ class AccuracyScorer(Scorer):
         return stats.accuracy()
 
 
-DEFAULT_SCORERS = [PPLScorer(), AccuracyScorer()]
+class AccuracySentenceLevelScorer(Scorer):
+
+    def __init__(self):
+        super(AccuracySentenceLevelScorer, self).__init__(float("-inf"), "sentence_acc")
+
+    def is_improving(self, stats):
+        return stats.accuracy_sent() > self.best_score
+
+    def is_decreasing(self, stats):
+        return stats.accuracy_sent() < self.best_score
+
+    def _caller(self, stats):
+        return stats.accuracy_sent()
+
+
+DEFAULT_SCORERS = [PPLScorer(), AccuracyScorer(), AccuracySentenceLevelScorer()]
 
 
 SCORER_BUILDER = {

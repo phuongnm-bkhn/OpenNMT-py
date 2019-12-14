@@ -269,6 +269,11 @@ class Trainer(object):
                 # Run patience mechanism
                 if self.earlystopper is not None:
                     self.earlystopper(valid_stats, step)
+
+                    # If this step increase performance => save the best model
+                    if self.earlystopper.is_improving():
+                        self.model_saver.save_best(moving_average=self.moving_average)
+
                     # If the patience has reached the limit, stop training
                     if self.earlystopper.has_stopped():
                         break
