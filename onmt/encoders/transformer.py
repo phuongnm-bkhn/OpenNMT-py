@@ -33,6 +33,8 @@ class TransformerEncoderLayer(nn.Module):
         self.feed_forward = PositionwiseFeedForward(d_model, d_ff, dropout)
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
         self.dropout = nn.Dropout(dropout)
+        self.save_self_attn = False
+        self.self_attn_data = None
 
     def forward(self, inputs, mask):
         """
@@ -46,8 +48,11 @@ class TransformerEncoderLayer(nn.Module):
             * outputs ``(batch_size, src_len, model_dim)``
         """
         input_norm = self.layer_norm(inputs)
-        context, _ = self.self_attn(input_norm, input_norm, input_norm,
+        context, self_attn_data = self.self_attn(input_norm, input_norm, input_norm,
                                     mask=mask, attn_type="self")
+        if self.save_self_attn:
+            self.self_attn_data = self_attn_data
+
         out = self.dropout(context) + inputs
         return self.feed_forward(out)
 
@@ -55,6 +60,9 @@ class TransformerEncoderLayer(nn.Module):
         self.self_attn.update_dropout(attention_dropout)
         self.feed_forward.update_dropout(dropout)
         self.dropout.p = dropout
+
+    def clean_self_attn_data(self):
+        self.self_attn_data = None
 
 
 class TransformerEncoder(EncoderBase):

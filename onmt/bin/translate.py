@@ -30,8 +30,10 @@ def translate(opt):
             batch_type=opt.batch_type,
             attn_debug=opt.attn_debug,
             align_debug=opt.align_debug,
-            marking_condition=opt.marking_condition
-            )
+            marking_condition=opt.marking_condition,
+            self_attn_debug=opt.self_attn_debug,
+            self_attn_folder_save="/".join(opt.src.split("/")[:-1])
+        )
 
 
 def _get_parser():

@@ -34,6 +34,8 @@ class CombinedTransformerRnnEncoderLayer(nn.Module):
                                      use_bridge=False)
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
         self.dropout = nn.Dropout(dropout)
+        self.save_self_attn = False
+        self.self_attn_data = None
 
     def forward(self, inputs, mask, lengths):
         """
@@ -47,8 +49,10 @@ class CombinedTransformerRnnEncoderLayer(nn.Module):
             * outputs ``(batch_size, src_len, model_dim)``
         """
         input_norm = self.layer_norm(inputs)
-        context, _ = self.self_attn(input_norm, input_norm, input_norm,
-                                    mask=mask, attn_type="self")
+        context, self_attn_data = self.self_attn(input_norm, input_norm, input_norm,
+                                                 mask=mask, attn_type="self")
+        if self.save_self_attn:
+            self.self_attn_data = self_attn_data
         final_state, memory_bank, rnn_lengths = self.lstm_layer(context.transpose(0, 1), lengths)
         context = memory_bank.transpose(0, 1)
         out = self.dropout(context) + inputs
@@ -59,29 +63,15 @@ class CombinedTransformerRnnEncoderLayer(nn.Module):
         self.feed_forward.update_dropout(dropout)
         self.dropout.p = dropout
 
+    def clean_self_attn_data(self):
+        self.self_attn_data = None
+
 
 class EmbeddingSkipped(nn.Module):
     def __init__(self, embedding_size):
         super(EmbeddingSkipped, self).__init__()
         self.embedding_size = embedding_size
         pass
-
-    # def _validate_args(self, feat_merge, feat_vocab_sizes, feat_vec_exponent,
-    #                    feat_vec_size, feat_padding_idx):
-    #     pass
-    #
-    # @property
-    # def word_lut(self):
-    #     """Word look-up table."""
-    #     return self.make_embedding[0][0]
-    #
-    # @property
-    # def emb_luts(self):
-    #     """Embedding look-up table."""
-    #     return self.make_embedding[0]
-    #
-    # def load_pretrained_vectors(self, emb_file):
-    #     pass
 
     def forward(self, source, step=None):
         return source

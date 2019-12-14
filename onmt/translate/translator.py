@@ -3,6 +3,8 @@
 from __future__ import print_function
 import codecs
 import copy
+import logging
+import matplotlib.pyplot as plt
 import os
 import math
 import time
@@ -16,7 +18,7 @@ import onmt.inputters as inputters
 import onmt.decoders.ensemble
 from onmt.translate.beam_search import BeamSearch
 from onmt.translate.greedy_search import GreedySearch
-from onmt.utils.misc import tile, set_random_seed, report_matrix
+from onmt.utils.misc import tile, set_random_seed, report_matrix, draw
 from onmt.utils.alignment import extract_alignment, build_align_pharaoh
 from onmt.modules.copy_generator import collapse_copy_scores
 
@@ -328,6 +330,8 @@ class Translator(object):
             attn_debug=False,
             align_debug=False,
             phrase_table="",
+            self_attn_debug=False,
+            self_attn_folder_save="./",
             marking_condition=None):
         """Translate content of ``src`` and get gold scores from ``tgt``.
 
@@ -339,6 +343,7 @@ class Translator(object):
             batch_size (int): size of examples per mini-batch
             attn_debug (bool): enables the attention logging
             align_debug (bool): enables the word alignment logging
+            self_attn_debug (bool): enables the self attention logging
 
         Returns:
             (`list`, `list`)
@@ -449,6 +454,33 @@ class Translator(object):
                         self.logger.info(output)
                     else:
                         os.write(1, output.encode('utf-8'))
+                if self_attn_debug:
+                    if not self.verbose:
+                        sent_number = next(counter)
+                    if not attn_debug:
+                        preds = trans.pred_sents[0]
+                        preds.append('</s>')
+                    if self.data_type == 'text':
+                        srcs = trans.src_raw
+                    self_attn_data = trans.self_attn[:, :, :len(trans.src_raw), :len(trans.src_raw)]
+
+                    fig, axs = plt.subplots(self_attn_data.size(0), self_attn_data.size(1), figsize=(30, 6))
+                    fig.suptitle('Self attention Sentence {}, {} layers, {} heads'.format(sent_number,
+                                                                                        self_attn_data.size(0),
+                                                                                        self_attn_data.size(1)
+                                                                                        ))
+                    for layer in range(0, self_attn_data.size(0)):
+                        for h in range(self_attn_data.size(1)):
+                            draw(self_attn_data[layer][h],
+                                 srcs if layer == self_attn_data.size(0) - 1 else [], srcs if h == 0 else [], ax=axs[layer][h])
+
+                    if not os.path.isdir("{}/self-attn-debug".format(self_attn_folder_save)):
+                        os.mkdir("{}/self-attn-debug".format(self_attn_folder_save))
+                    plt.savefig('{}/self-attn-debug/sent-{}.pdf'.format(self_attn_folder_save, sent_number),
+                        bbox_inches='tight',
+                        pad_inches=0)
+                    plt.close()
+
 
                 if align_debug:
                     if trans.gold_sent is not None:
@@ -700,7 +732,24 @@ class Translator(object):
         batch_size = batch.batch_size
 
         # (1) Run the encoder on the src.
+        # set flag save self-attention
+        flag_debug_self_attn = decode_strategy.return_attention and hasattr(self.model.encoder, "transformer")
+        self_attn_data = None
+        if flag_debug_self_attn:
+            for layer_tf in self.model.encoder.transformer:
+                try:
+                    layer_tf.save_self_attn = True
+                except:
+                    logging.warning(str(layer_tf) + " dont have attribute: layer_tf.save_self_attn = True")
         src, enc_states, memory_bank, src_lengths = self._run_encoder(batch)
+        if flag_debug_self_attn:
+            self_attn_data = []
+            for layer_tf in self.model.encoder.transformer:
+                self_attn_data.append(layer_tf.self_attn_data)
+            self_attn_data = torch.stack(self_attn_data)
+            self_attn_data = self_attn_data.transpose(0, 1)
+            for layer_tf in self.model.encoder.transformer:
+                layer_tf.clean_self_attn_data()
         self.model.decoder.init_state(src, memory_bank, enc_states)
 
         enc_label_scores = self.model.enc_generator(memory_bank.view(-1, memory_bank.size(2))) \
@@ -721,6 +770,8 @@ class Translator(object):
             "gold_score": self._gold_score(
                 batch, memory_bank, src_lengths, src_vocabs, use_src_map,
                 enc_states, batch_size, src)}
+        if self_attn_data is not None:
+            results["self-attn"] = self_attn_data
 
         # (2) prep decode_strategy. Possibly repeat src objects.
         src_map = batch.src_map if use_src_map else None
