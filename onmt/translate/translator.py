@@ -424,14 +424,15 @@ class Translator(object):
                 self.out_file_tgt_gold.write(' '.join(trans.gold_sent) + '\n')
                 self.out_file_tgt_gold.flush()
 
-                self.out_file_src_label_pred.write(' '.join(trans.src_label) + '\n')
-                self.out_file_src_label_pred.flush()
-                self.out_file_src_label_gold.write(' '.join(trans.src_label_gold) + '\n')
-                self.out_file_src_label_gold.flush()
+                if trans.src_label is not None:
+                    self.out_file_src_label_pred.write(' '.join(trans.src_label) + '\n')
+                    self.out_file_src_label_pred.flush()
+                    self.out_file_src_label_gold.write(' '.join(trans.src_label_gold) + '\n')
+                    self.out_file_src_label_gold.flush()
 
-                self.out_file.write(' '.join(self.merge_sentence_label(trans.src_label, trans.src_raw,
-                                                                       trans.pred_sents[0])) + '\n')
-                self.out_file.flush()
+                    self.out_file.write(' '.join(self.merge_sentence_label(trans.src_label, trans.src_raw,
+                                                                           trans.pred_sents[0])) + '\n')
+                    self.out_file.flush()
 
                 if self.verbose:
                     sent_number = next(counter)
@@ -752,24 +753,35 @@ class Translator(object):
                 layer_tf.clean_self_attn_data()
         self.model.decoder.init_state(src, memory_bank, enc_states)
 
-        enc_label_scores = self.model.enc_generator(memory_bank.view(-1, memory_bank.size(2))) \
-            .view(memory_bank.shape[0], memory_bank.shape[1], -1)
-        enc_label = torch.topk(enc_label_scores, 1, dim=-1, )[1].view(enc_label_scores.shape[0], -1).t()
-        enc_label = [enc_label_sent[:src_lengths[i]] for i, enc_label_sent in enumerate(enc_label)]
-        enc_label_gold = batch.src_label.view(batch.src_label.shape[0], -1).t()
-        enc_label_gold = [enc_label_sent[:src_lengths[i]] for i, enc_label_sent in enumerate(enc_label_gold)]
+        if hasattr(self.model, "enc_generator"):
+            enc_label_scores = self.model.enc_generator(memory_bank.view(-1, memory_bank.size(2))) \
+                .view(memory_bank.shape[0], memory_bank.shape[1], -1)
+            enc_label = torch.topk(enc_label_scores, 1, dim=-1, )[1].view(enc_label_scores.shape[0], -1).t()
+            enc_label = [enc_label_sent[:src_lengths[i]] for i, enc_label_sent in enumerate(enc_label)]
+            enc_label_gold = batch.src_label.view(batch.src_label.shape[0], -1).t()
+            enc_label_gold = [enc_label_sent[:src_lengths[i]] for i, enc_label_sent in enumerate(enc_label_gold)]
 
-        results = {
-            "predictions": None,
-            "scores": None,
-            "enc_label_scores": enc_label_scores,
-            "enc_label": enc_label,
-            "enc_label_gold": enc_label_gold,
-            "attention": None,
-            "batch": batch,
-            "gold_score": self._gold_score(
-                batch, memory_bank, src_lengths, src_vocabs, use_src_map,
-                enc_states, batch_size, src)}
+            results = {
+                "predictions": None,
+                "scores": None,
+                "enc_label_scores": enc_label_scores,
+                "enc_label": enc_label,
+                "enc_label_gold": enc_label_gold,
+                "attention": None,
+                "batch": batch,
+                "gold_score": self._gold_score(
+                    batch, memory_bank, src_lengths, src_vocabs, use_src_map,
+                    enc_states, batch_size, src)}
+        else:
+            results = {
+                "predictions": None,
+                "scores": None,
+                "attention": None,
+                "batch": batch,
+                "gold_score": self._gold_score(
+                    batch, memory_bank, src_lengths, src_vocabs, use_src_map,
+                    enc_states, batch_size, src)}
+
         if self_attn_data is not None:
             results["self-attn"] = self_attn_data
 

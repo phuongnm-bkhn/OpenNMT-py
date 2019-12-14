@@ -63,17 +63,27 @@ class TranslationBuilder(object):
                len(translation_batch["predictions"]))
         batch_size = batch.batch_size
 
-        # preds, pred_score, attn, align, gold_score, indices = list(zip(
-        preds, pred_score, attn, align, gold_score, enc_label, enc_label_gold, indices = list(zip(
-            *sorted(zip(translation_batch["predictions"],
-                        translation_batch["scores"],
-                        translation_batch["attention"],
-                        translation_batch["alignment"],
-                        translation_batch["gold_score"],
-                        translation_batch.get("enc_label"),
-                        translation_batch.get("enc_label_gold"),
-                        batch.indices.data),
-                    key=lambda x: x[-1])))
+        enc_label, enc_label_gold = None, None
+        if "enc_label" in translation_batch:
+            preds, pred_score, attn, align, gold_score, enc_label, enc_label_gold, indices = list(zip(
+                *sorted(zip(translation_batch["predictions"],
+                            translation_batch["scores"],
+                            translation_batch["attention"],
+                            translation_batch["alignment"],
+                            translation_batch["gold_score"],
+                            translation_batch.get("enc_label"),
+                            translation_batch.get("enc_label_gold"),
+                            batch.indices.data),
+                        key=lambda x: x[-1])))
+        else:
+            preds, pred_score, attn, align, gold_score, indices = list(zip(
+                *sorted(zip(translation_batch["predictions"],
+                            translation_batch["scores"],
+                            translation_batch["attention"],
+                            translation_batch["alignment"],
+                            translation_batch["gold_score"],
+                            batch.indices.data),
+                        key=lambda x: x[-1])))
 
         if not any(align):  # when align is a empty nested list
             align = [None] * batch_size

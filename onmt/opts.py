@@ -204,8 +204,6 @@ def model_opts(parser):
               help="lambda to adjust error rate between source and target label.")
     group.add('--marking_mechanism', '-marking_mechanism', action="store_true", default=False,
               help="Marking mechanism when build model.")
-    group.add('--marking_condition', '-marking_condition', type=str, default="*",
-              help="regex filter marking token.")
 
 def preprocess_opts(parser):
     """ Pre-procesing options """
@@ -760,7 +758,7 @@ def translate_opts(parser):
               help="Using grayscale image can training "
                    "model faster and smaller")
 
-    group.add('--marking_condition', '-marking_condition', type=str, default="*",
+    group.add('--marking_condition', '-marking_condition', type=str, default=None,
               help="regex filter marking token.")
     group.add('--marking_mechanism', '-marking_mechanism', action="store_true", default=False,
               help="Marking mechanism when build model.")
