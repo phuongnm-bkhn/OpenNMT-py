@@ -207,7 +207,7 @@ class LossComputeBase(nn.Module):
                         break
 
                 if flag_is_sent:
-                    flag_sent_right = False
+                    flag_sent_right = True
                     for i_w in range(result_with_batch.size(0)):
                         if non_padding_batch[i_w][sent_i]:
                             if not result_with_batch[i_w][sent_i]:
