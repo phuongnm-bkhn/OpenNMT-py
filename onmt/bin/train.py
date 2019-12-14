@@ -22,7 +22,7 @@ def train(opt):
     ArgumentParser.update_model_opts(opt)
     ArgumentParser.validate_model_opts(opt)
 
-    set_random_seed(opt.seed, False)
+    set_random_seed(opt.seed, torch.cuda.is_available())
 
     # Load checkpoint if we resume from a previous training.
     if opt.train_from:

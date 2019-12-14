@@ -3,6 +3,7 @@ import seaborn
 import matplotlib.pyplot as plt
 import torch
 import random
+import numpy as np
 import inspect
 from itertools import islice, repeat
 
@@ -93,6 +94,8 @@ def set_random_seed(seed, is_cuda):
         # some cudnn methods can be random even after fixing the seed
         # unless you tell it to be deterministic
         torch.backends.cudnn.deterministic = True
+
+        np.random.seed(seed)
 
     if is_cuda and seed > 0:
         # These ensure same initialization in multi gpu mode
