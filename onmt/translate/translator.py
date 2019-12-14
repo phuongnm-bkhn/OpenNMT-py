@@ -191,10 +191,13 @@ class Translator(object):
                 "Coverage penalty requires an attentional decoder.")
         self.out_file = out_file
         self.report_align = report_align
-        self.out_file_tgt_gold = codecs.open(out_file.stream.name + ".tgt.gold.txt", 'w+', 'utf-8')
-        self.out_file_tgt_pred = codecs.open(out_file.stream.name + ".tgt.pred.txt", 'w+', 'utf-8')
-        self.out_file_src_label_pred = codecs.open(out_file.stream.name + ".src.label.pred.txt", 'w+', 'utf-8')
-        self.out_file_src_label_gold = codecs.open(out_file.stream.name + ".src.label.gold.txt", 'w+', 'utf-8')
+
+        if "src_label" in fields:
+            self.out_file_tgt_gold = codecs.open(out_file.stream.name + ".tgt.gold.txt", 'w+', 'utf-8')
+            self.out_file_tgt_pred = codecs.open(out_file.stream.name + ".tgt.pred.txt", 'w+', 'utf-8')
+            self.out_file_src_label_pred = codecs.open(out_file.stream.name + ".src.label.pred.txt", 'w+', 'utf-8')
+            self.out_file_src_label_gold = codecs.open(out_file.stream.name + ".src.label.gold.txt", 'w+', 'utf-8')
+
         self.report_score = report_score
         self.logger = logger
 
@@ -419,12 +422,12 @@ class Translator(object):
                                         n_best_preds, n_best_preds_align)]
                 all_predictions += [n_best_preds]
 
-                self.out_file_tgt_pred.write('\n'.join(n_best_preds) + '\n')
-                self.out_file_tgt_pred.flush()
-                self.out_file_tgt_gold.write(' '.join(trans.gold_sent) + '\n')
-                self.out_file_tgt_gold.flush()
-
                 if trans.src_label is not None:
+                    self.out_file_tgt_pred.write('\n'.join(n_best_preds) + '\n')
+                    self.out_file_tgt_pred.flush()
+                    self.out_file_tgt_gold.write(' '.join(trans.gold_sent) + '\n')
+                    self.out_file_tgt_gold.flush()
+
                     self.out_file_src_label_pred.write(' '.join(trans.src_label) + '\n')
                     self.out_file_src_label_pred.flush()
                     self.out_file_src_label_gold.write(' '.join(trans.src_label_gold) + '\n')
@@ -432,6 +435,9 @@ class Translator(object):
 
                     self.out_file.write(' '.join(self.merge_sentence_label(trans.src_label, trans.src_raw,
                                                                            trans.pred_sents[0])) + '\n')
+                    self.out_file.flush()
+                else:
+                    self.out_file.write('\n'.join(n_best_preds) + '\n')
                     self.out_file.flush()
 
                 if self.verbose:
