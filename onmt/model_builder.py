@@ -174,14 +174,17 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
     # Build Generator.
 
     # add encode generator: to predict label of encoder
-    count_len_encode_label = len(fields["src_label"].base_field.vocab) # count label = 2*N + 1 with N == count(arg_id)
-    gen_func_encode = nn.LogSoftmax(dim=-1) #TODO: setting for softmax/CRF layer
-    enc_generator = nn.Sequential(
-        nn.Linear(model_opt.enc_rnn_size,
-                  count_len_encode_label),
-        Cast(torch.float32),
-        gen_func_encode
-    )
+    if model_opt.marking_mechanism:
+        assert "src_label" in fields, \
+            "preprocess with -marking_mechanism if you use marking mechanism"
+        count_len_encode_label = len(fields["src_label"].base_field.vocab) # count label = 2*N + 1 with N == count(arg_id)
+        gen_func_encode = nn.LogSoftmax(dim=-1) #TODO: setting for softmax/CRF layer
+        enc_generator = nn.Sequential(
+            nn.Linear(model_opt.enc_rnn_size,
+                      count_len_encode_label),
+            Cast(torch.float32),
+            gen_func_encode
+        )
 
     # decode generator
     if not model_opt.copy_attn:

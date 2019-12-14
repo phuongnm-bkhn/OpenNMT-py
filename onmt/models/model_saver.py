@@ -106,10 +106,12 @@ class ModelSaver(ModelSaverBase):
                             if 'generator' not in k}
         generator_state_dict = model.generator.state_dict()
 
-        real_enc_generator = (model.enc_generator.module
-                              if isinstance(model.enc_generator, nn.DataParallel)
-                              else model.enc_generator)
-        enc_generator_state_dict = real_enc_generator.state_dict()
+        enc_generator_state_dict = None
+        if hasattr(model, "enc_generator"):
+            real_enc_generator = (model.enc_generator.module
+                                  if isinstance(model.enc_generator, nn.DataParallel)
+                                  else model.enc_generator)
+            enc_generator_state_dict = real_enc_generator.state_dict()
         # NOTE: We need to trim the vocab to remove any unk tokens that
         # were not originally here.
 
@@ -128,10 +130,11 @@ class ModelSaver(ModelSaverBase):
             'model': model_state_dict,
             'generator': generator_state_dict,
             'vocab': vocab,
-            'enc_generator': enc_generator_state_dict,
             'opt': self.model_opt,
             'optim': self.optim.state_dict(),
         }
+        if enc_generator_state_dict is not None:
+            checkpoint['enc_generator'] = enc_generator_state_dict
 
         logger.info("Saving checkpoint %s_step_%d.pt" % (self.base_path, step))
         checkpoint_path = '%s_step_%d.pt' % (self.base_path, step)

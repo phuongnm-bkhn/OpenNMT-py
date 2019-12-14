@@ -112,18 +112,21 @@ class Dataset(TorchtextDataset):
     def __init__(self, fields, readers, data, dirs, sort_key,
                  filter_pred=None, marking_condition=None):
         self.sort_key = sort_key
-        self.marking_condition = marking_condition
         can_copy = 'src_map' in fields and 'alignment' in fields
 
         count_sample = len(data[0][1])
+
+        # marking mechanism
         transformed_data = []
-        for i in range(count_sample):
-            src_str, tgt_str = data[0][1][i], data[1][1][i]
-            encode_words, decode_words, decode_transformed, encode_labels = \
-                Dataset.matching_enc_label(src_str.decode("utf-8") , tgt_str.decode("utf-8"), marking_condition)
-            data[1][1][i] = (" ".join(decode_transformed)).encode('utf-8')
-            data[0][1][i] = (" ".join(encode_words)).encode('utf-8')
-            transformed_data.append((encode_words, decode_words, decode_transformed, encode_labels))
+        if "src_label" in fields:
+            self.marking_condition = marking_condition
+            for i in range(count_sample):
+                src_str, tgt_str = data[0][1][i], data[1][1][i]
+                encode_words, decode_words, decode_transformed, encode_labels = \
+                    Dataset.matching_enc_label(src_str.decode("utf-8") , tgt_str.decode("utf-8"), marking_condition)
+                data[1][1][i] = (" ".join(decode_transformed)).encode('utf-8')
+                data[0][1][i] = (" ".join(encode_words)).encode('utf-8')
+                transformed_data.append((encode_words, decode_words, decode_transformed, encode_labels))
 
         read_iters = [r.read(dat[1], dat[0], dir_) for r, dat, dir_
                       in zip(readers, data, dirs)]
@@ -154,8 +157,10 @@ class Dataset(TorchtextDataset):
             if k not in ex_fields:
                 fields.append((k, org_fields[k]))
 
-        for sample in examples:
-            setattr(sample, 'src_label', [transformed_data[sample.indices][3]])
+        # marking mechanism
+        if "src_label" in org_fields:
+            for sample in examples:
+                setattr(sample, 'src_label', [transformed_data[sample.indices][3]])
 
         super(Dataset, self).__init__(examples, fields, filter_pred)
 

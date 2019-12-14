@@ -108,7 +108,8 @@ def get_fields(
     dynamic_dict=False,
     with_align=False,
     src_truncate=None,
-    tgt_truncate=None
+    tgt_truncate=None,
+    marking_mechanism=False
 ):
     """
     Args:
@@ -166,7 +167,8 @@ def get_fields(
                         "pad": pad, "bos": None, "eos": None,
                         "truncate": tgt_truncate,
                         "base_name": "src_label"}
-    fields["src_label"] = fields_getters["text"](**tgt_field_kwargs)
+    if marking_mechanism:
+        fields["src_label"] = fields_getters["text"](**tgt_field_kwargs)
 
     indices = Field(use_vocab=False, dtype=torch.long, sequential=False)
     fields["indices"] = indices

@@ -202,6 +202,8 @@ def model_opts(parser):
                    "See https://nvidia.github.io/apex/amp.html#opt-levels.")
     group.add('--lambda_marking_mechanism', '-lambda_marking_mechanism', type=float, default=0.5,
               help="lambda to adjust error rate between source and target label.")
+    group.add('--marking_mechanism', '-marking_mechanism', action="store_true", default=False,
+              help="Marking mechanism when build model.")
     group.add('--marking_condition', '-marking_condition', type=str, default="*",
               help="regex filter marking token.")
 
@@ -248,6 +250,8 @@ def preprocess_opts(parser):
                    "each shard has shard_size samples")
     group.add('--marking_condition', '-marking_condition', type=str, default=None,
               help="pattern to match label in marking step")
+    group.add('--marking_mechanism', '-marking_mechanism', action="store_true", default=False,
+              help="Marking mechanism when build model.")
 
     group.add('--num_threads', '-num_threads', type=int, default=1,
               help="Number of shards to build in parallel.")
@@ -758,6 +762,8 @@ def translate_opts(parser):
 
     group.add('--marking_condition', '-marking_condition', type=str, default="*",
               help="regex filter marking token.")
+    group.add('--marking_mechanism', '-marking_mechanism', action="store_true", default=False,
+              help="Marking mechanism when build model.")
 
 # Copyright 2016 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be

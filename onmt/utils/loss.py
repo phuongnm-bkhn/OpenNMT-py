@@ -55,16 +55,18 @@ def build_loss_compute(model, tgt_field, opt, train=True):
             criterion, loss_gen, tgt_field.vocab, opt.copy_loss_by_seqlength,
             lambda_coverage=opt.lambda_coverage
         )
-    else:
-        # compute = NMTLossCompute(
-        #     criterion, loss_gen, lambda_coverage=opt.lambda_coverage,
-        #     lambda_align=opt.lambda_align)
+    elif opt.marking_mechanism:
         compute = NMTMarkLossCompute(criterion, loss_gen,
                                      enc_criterion=nn.NLLLoss(ignore_index=padding_idx, reduction='sum'),
                                      lambda_coverage=opt.lambda_coverage,
                                      lambda_align=opt.lambda_align,
                                      enc_generator=model.enc_generator,
                                      lambda_marking_mechanism=opt.lambda_marking_mechanism)
+    else:
+        compute = NMTLossCompute(
+            criterion, loss_gen, lambda_coverage=opt.lambda_coverage,
+            lambda_align=opt.lambda_align)
+
     compute.to(device)
 
     return compute
@@ -132,7 +134,8 @@ class LossComputeBase(nn.Module):
                  normalization=1.0,
                  shard_size=0,
                  trunc_start=0,
-                 trunc_size=None):
+                 trunc_size=None,
+                 enc_hiddens=None):
         """Compute the forward loss, possibly in shards in which case this
         method also runs the backward pass and returns ``None`` as the loss
         value.

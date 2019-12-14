@@ -366,14 +366,6 @@ class Trainer(object):
 
                 # 3. Compute loss.
                 try:
-                    # loss, batch_stats = self.train_loss(
-                    #     batch,
-                    #     outputs,
-                    #     attns,
-                    #     normalization=normalization,
-                    #     shard_size=self.shard_size,
-                    #     trunc_start=j,
-                    #     trunc_size=trunc_size)
                     loss, batch_stats = self.train_loss(
                         batch,
                         outputs,
