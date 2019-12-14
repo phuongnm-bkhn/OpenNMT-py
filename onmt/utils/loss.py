@@ -199,20 +199,24 @@ class LossComputeBase(nn.Module):
             result_with_batch = pred.eq(target).view(-1, batch_size)
             non_padding_batch = target.ne(self.padding_idx).view(-1, batch_size)
             for sent_i in range(batch_size):
-                flag_sent_right = True
+                flag_is_sent = False
                 for i_w in range(result_with_batch.size(0)):
                     if non_padding_batch[i_w][sent_i]:
                         count_sent += 1
+                        flag_is_sent = True
                         break
-                for i_w in range(result_with_batch.size(0)):
-                    if non_padding_batch[i_w][sent_i]:
-                        if not result_with_batch[i_w][sent_i]:
-                            flag_sent_right = False
+
+                if flag_is_sent:
+                    flag_sent_right = False
+                    for i_w in range(result_with_batch.size(0)):
+                        if non_padding_batch[i_w][sent_i]:
+                            if not result_with_batch[i_w][sent_i]:
+                                flag_sent_right = False
+                                break
+                        else:
                             break
-                    else:
-                        break
-                if flag_sent_right:
-                    count_sent_correct += 1
+                    if flag_sent_right:
+                        count_sent_correct += 1
 
         return onmt.utils.Statistics(loss.item(), num_non_padding, num_correct, count_sent_correct=count_sent_correct,
                                      count_sent=count_sent)
