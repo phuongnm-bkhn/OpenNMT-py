@@ -136,8 +136,8 @@ class ModelSaver(ModelSaverBase):
         if enc_generator_state_dict is not None:
             checkpoint['enc_generator'] = enc_generator_state_dict
 
-        logger.info("Saving checkpoint %s_step_%d.pt" % (self.base_path, step))
-        checkpoint_path = '%s_step_%d.pt' % (self.base_path, step)
+        logger.info("Saving checkpoint %s_best.pt" % (self.base_path))
+        checkpoint_path = '%s_best.pt' % (self.base_path)
         torch.save(checkpoint, checkpoint_path)
         return checkpoint, checkpoint_path
 
