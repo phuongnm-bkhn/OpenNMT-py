@@ -11,6 +11,8 @@ def config_opts(parser):
     parser.add('-save_config', '--save_config', required=False,
                is_write_out_config_file_arg=True,
                help='config file save path')
+    parser.add('-write_config', '--write_config', type=str, default=None, required=False,
+               help='config file save path and not exit')
 
 
 def model_opts(parser):

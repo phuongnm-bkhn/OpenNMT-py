@@ -201,6 +201,8 @@ def main():
     parser = _get_parser()
 
     opt = parser.parse_args()
+    if opt.write_config is not None:
+        parser.write_config_file(opt, [opt.write_config], exit_after=False)
     train(opt)
 
 
