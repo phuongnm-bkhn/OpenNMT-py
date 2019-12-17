@@ -156,8 +156,8 @@ def report_matrix(row_label, column_label, matrix):
         row_format = "{:>10.10} " + "{:>10.7f} " * len(row_label)
     return output
 
+
 def draw(data, x, y, ax):
     seaborn.heatmap(data,
                     xticklabels=x, square=True, yticklabels=y, vmin=0.0, vmax=1.0,
                     cbar=False, ax=ax, annot=False, fmt=".2f")
-    plt.yticks(rotation=45)
