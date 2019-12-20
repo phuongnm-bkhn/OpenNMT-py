@@ -18,7 +18,7 @@ import onmt.inputters as inputters
 import onmt.decoders.ensemble
 from onmt.translate.beam_search import BeamSearch
 from onmt.translate.greedy_search import GreedySearch
-from onmt.utils.misc import tile, set_random_seed, report_matrix, draw
+from onmt.utils.misc import tile, set_random_seed, report_matrix, draw, viz_attention
 from onmt.utils.alignment import extract_alignment, build_align_pharaoh
 from onmt.modules.copy_generator import collapse_copy_scores
 
@@ -461,6 +461,11 @@ class Translator(object):
                         self.logger.info(output)
                     else:
                         os.write(1, output.encode('utf-8'))
+                    if not self.verbose:
+                        sent_number = next(counter)
+                    viz_attention(self_attn_folder_save, "align-attn",
+                                  torch.unsqueeze(torch.unsqueeze(trans.attns[0][:, :len(srcs)], 0), 0),
+                                  srcs, trans.pred_sents[0], base_cell=6, sent_number=sent_number)
                 if self_attn_debug:
                     if not self.verbose:
                         sent_number = next(counter)
@@ -473,38 +478,14 @@ class Translator(object):
                     # viz encoding self attention
                     tgt_raw = trans.pred_sents[0]
                     attention_infor = [
-                        ("self-attn-debug", trans.self_attn[:, :, :len(trans.src_raw), :len(trans.src_raw)],
-                         trans.src_raw, trans.src_raw, 10),
+                        ("self-attn-debug", trans.self_attn[:, :, :len(srcs), :len(srcs)],
+                         srcs, srcs, 10),
                         ("decoding-self-attn-debug", trans.decoding_self_attn[0][:, :, :len(tgt_raw), :len(tgt_raw)],
                          ["<s>"] + tgt_raw[:-1], ["<s>"] + tgt_raw[:-1], 20),
-                        ("align-attn", torch.unsqueeze(torch.unsqueeze(trans.attns[0], 0), 0), trans.src_raw,
-                         tgt_raw[:], 6)
                     ]
                     for (folder_name, self_attn_data, x_stick, y_stick, base_cell) in attention_infor:
-
-                        fig, axs = plt.subplots(self_attn_data.size(0), self_attn_data.size(1),
-                                                figsize=(int(base_cell*1.0 / self_attn_data.size(0) *
-                                                             self_attn_data.size(1)),
-                                                         base_cell))
-                        fig.suptitle('Self attention Sentence {}, {} layers, {} heads'.format(sent_number,
-                                                                                              self_attn_data.size(0),
-                                                                                              self_attn_data.size(1)
-                                                                                              ))
-                        for layer in range(0, self_attn_data.size(0)):
-                            for h in range(self_attn_data.size(1)):
-                                draw(self_attn_data[layer][h],
-                                     x_stick if layer == self_attn_data.size(0) - 1 else [],
-                                     y_stick if h == 0 else [], ax=axs[layer][h]
-                                        if self_attn_data.size(1) > 1 or  self_attn_data.size(0) > 1 else axs)
-
-                        if not os.path.isdir("{}/{}".format(self_attn_folder_save, folder_name)):
-                            os.mkdir("{}/{}".format(self_attn_folder_save, folder_name))
-                        plt.savefig('{}/{}/sent-{}.pdf'.format(self_attn_folder_save, folder_name, sent_number),
-                            bbox_inches='tight',
-                            pad_inches=0)
-                        plt.close()
-
-
+                        viz_attention(self_attn_folder_save, folder_name, self_attn_data, x_stick, y_stick, base_cell,
+                                      sent_number=sent_number)
 
                 if align_debug:
                     if trans.gold_sent is not None:

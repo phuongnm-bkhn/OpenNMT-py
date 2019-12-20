@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import os
+
 import seaborn
 import matplotlib.pyplot as plt
 import torch
@@ -161,3 +163,32 @@ def draw(data, x, y, ax):
     seaborn.heatmap(data,
                     xticklabels=x, square=True, yticklabels=y, vmin=0.0, vmax=1.0,
                     cbar=False, ax=ax, annot=False, fmt=".2f", annot_kws={"size": 6})
+
+
+def viz_attention(self_attn_folder_save, folder_name, self_attn_data, x_stick, y_stick, base_cell, sent_number=""):
+
+    fig, axs = plt.subplots(self_attn_data.size(0), self_attn_data.size(1),
+                            figsize=(int(base_cell*1.0 / self_attn_data.size(0) *
+                                         self_attn_data.size(1)),
+                                     base_cell))
+    if self_attn_data.size(1) > 1:
+        fig.suptitle('Self attention Sentence {}, {} layers, {} heads'.format(sent_number,
+                                                                              self_attn_data.size(0),
+                                                                              self_attn_data.size(1)
+                                                                              ))
+    else:
+        fig.suptitle('Attention Sentence {} '.format(sent_number))
+
+    for layer in range(0, self_attn_data.size(0)):
+        for h in range(self_attn_data.size(1)):
+            draw(self_attn_data[layer][h],
+                 x_stick if layer == self_attn_data.size(0) - 1 else [],
+                 y_stick if h == 0 else [],
+                 ax=axs[layer][h] if self_attn_data.size(1) > 1 or self_attn_data.size(0) > 1 else axs)
+
+    if not os.path.isdir("{}/{}".format(self_attn_folder_save, folder_name)):
+        os.mkdir("{}/{}".format(self_attn_folder_save, folder_name))
+    plt.savefig('{}/{}/sent-{}.pdf'.format(self_attn_folder_save, folder_name, sent_number),
+                bbox_inches='tight',
+                pad_inches=0)
+    plt.close()
