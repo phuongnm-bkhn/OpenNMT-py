@@ -96,6 +96,12 @@ class TranslationBuilder(object):
             src = None
         tgt = batch.tgt[:, :, 0].index_select(1, perm) \
             if self.has_tgt else None
+        # resort self-attn
+        if "self-attn" in translation_batch:
+            self_attn_data = translation_batch["self-attn"].index_select(0, perm)
+        # resort self-attn
+        if "decoding-self-attn" in translation_batch:
+            decoding_self_attn = [translation_batch["decoding-self-attn"][idx] for idx in perm]
 
         translations = []
         for b in range(batch_size):
@@ -130,8 +136,10 @@ class TranslationBuilder(object):
                 gold_sent, gold_score[b], align[b],
                 src_label=src_label,
                 src_label_gold=src_label_gold,
-                self_attn=translation_batch.get("self-attn")[b]
-                if "self-attn" in translation_batch else None
+                self_attn=self_attn_data[b]
+                if "self-attn" in translation_batch else None,
+                decoding_self_attn=decoding_self_attn[b]
+                if "decoding-self-attn" in translation_batch else None
             )
             translations.append(translation)
 
@@ -155,11 +163,11 @@ class Translation(object):
     """
 
     __slots__ = ["src", "src_raw",  "src_label", "src_label_gold", "pred_sents", "attns", "pred_scores",
-                 "gold_sent", "gold_score", "word_aligns", "self_attn"]
+                 "gold_sent", "gold_score", "word_aligns", "self_attn", "decoding_self_attn"]
 
     def __init__(self, src, src_raw, pred_sents,
                  attn, pred_scores, tgt_sent, gold_score, word_aligns, src_label=None, src_label_gold=None,
-                 self_attn=None):
+                 self_attn=None, decoding_self_attn=None):
         self.src = src
         self.src_raw = src_raw
         self.pred_sents = pred_sents
@@ -171,6 +179,7 @@ class Translation(object):
         self.src_label = src_label
         self.src_label_gold = src_label_gold
         self.self_attn = self_attn
+        self.decoding_self_attn = decoding_self_attn
 
     def log(self, sent_number):
         """

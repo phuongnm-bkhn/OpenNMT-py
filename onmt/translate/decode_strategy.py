@@ -68,6 +68,8 @@ class DecodeStrategy(object):
         self.predictions = [[] for _ in range(batch_size)]
         self.scores = [[] for _ in range(batch_size)]
         self.attention = [[] for _ in range(batch_size)]
+        self.self_attention_final = [[] for _ in range(batch_size)]
+        self.self_attention_cur = None
 
         self.alive_attn = None
 

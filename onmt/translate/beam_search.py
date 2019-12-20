@@ -147,7 +147,7 @@ class BeamSearch(DecodeStrategy):
     def batch_offset(self):
         return self._batch_offset
 
-    def advance(self, log_probs, attn):
+    def advance(self, log_probs, attn, self_attn=None):
         vocab_size = log_probs.size(-1)
 
         # using integer division to get an integer _B without casting
@@ -225,6 +225,33 @@ class BeamSearch(DecodeStrategy):
         self.is_finished = self.topk_ids.eq(self.eos)
         self.ensure_max_length()
 
+        # append step for
+        if self_attn is not None:
+            if self.self_attention_cur is None:
+                self.self_attention_cur = []
+                for i_batch in range(_B):
+                    self.self_attention_cur.append([])
+                    # for j_beam_serch in range(self.beam_size):
+                    #     self.self_attention_cur[i_batch].append([])
+            self_attn = self_attn.view(_B, self.beam_size, *self_attn.size()[1:])
+            batch_ids = [idx_batch[0] // self.beam_size for idx_batch in self.select_indices.view(_B, self.beam_size)]
+
+            for i_batch, batch_id in enumerate(batch_ids):
+                if len(self.self_attention_cur[i_batch]) > 0:
+                    for j_beam_serch in range(self.beam_size):
+                        self.self_attention_cur[i_batch][j_beam_serch] =\
+                            torch.nn.functional.pad(self.self_attention_cur[i_batch][j_beam_serch],
+                                                    [0, 1],
+                                                    'constant',
+                                                    0.0)
+                        self.self_attention_cur[i_batch][j_beam_serch] = \
+                            torch.cat((self.self_attention_cur[i_batch][j_beam_serch],
+                                         self_attn[i_batch, j_beam_serch]),  dim=-2)
+                else:
+                    # stack matrix
+                    for j_beam_serch in range(self.beam_size):
+                        self.self_attention_cur[batch_id].append(self_attn[i_batch, j_beam_serch])
+
     def update_finished(self):
         # Penalize beams that finished.
         _B_old = self.topk_log_probs.shape[0]
@@ -253,7 +280,12 @@ class BeamSearch(DecodeStrategy):
                     self.topk_scores[i, j],
                     predictions[i, j, 1:],  # Ignore start_token.
                     attention[:, i, j, :self.memory_lengths[i]]
-                    if attention is not None else None))
+                    if attention is not None else None,
+
+                    # customize: add self attention to hypotheis
+                    self.self_attention_cur[i][j]
+                    if self.self_attention_cur is not None else None,
+                ))
             # End condition is the top beam finished and we can return
             # n_best hypotheses.
             if self.ratio > 0:
@@ -266,13 +298,15 @@ class BeamSearch(DecodeStrategy):
             if finish_flag and len(self.hypotheses[b]) >= self.n_best:
                 best_hyp = sorted(
                     self.hypotheses[b], key=lambda x: x[0], reverse=True)
-                for n, (score, pred, attn) in enumerate(best_hyp):
+                for n, (score, pred, attn, self_attn) in enumerate(best_hyp):
                     if n >= self.n_best:
                         break
                     self.scores[b].append(score)
                     self.predictions[b].append(pred)  # ``(batch, n_best,)``
                     self.attention[b].append(
                         attn if attn is not None else [])
+                    if self_attn is not None:
+                        self.self_attention_final[b].append(self_attn)
             else:
                 non_finished_batch.append(i)
         non_finished = torch.tensor(non_finished_batch)

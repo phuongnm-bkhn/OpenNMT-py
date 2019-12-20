@@ -160,4 +160,4 @@ def report_matrix(row_label, column_label, matrix):
 def draw(data, x, y, ax):
     seaborn.heatmap(data,
                     xticklabels=x, square=True, yticklabels=y, vmin=0.0, vmax=1.0,
-                    cbar=False, ax=ax, annot=False, fmt=".2f")
+                    cbar=False, ax=ax, annot=False, fmt=".2f", annot_kws={"size": 6})

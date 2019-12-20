@@ -469,25 +469,41 @@ class Translator(object):
                         preds.append('</s>')
                     if self.data_type == 'text':
                         srcs = trans.src_raw
-                    self_attn_data = trans.self_attn[:, :, :len(trans.src_raw), :len(trans.src_raw)]
 
-                    fig, axs = plt.subplots(self_attn_data.size(0), self_attn_data.size(1),
-                                            figsize=(int(10.0 / self_attn_data.size(0) * self_attn_data.size(1)), 10))
-                    fig.suptitle('Self attention Sentence {}, {} layers, {} heads'.format(sent_number,
-                                                                                        self_attn_data.size(0),
-                                                                                        self_attn_data.size(1)
-                                                                                        ))
-                    for layer in range(0, self_attn_data.size(0)):
-                        for h in range(self_attn_data.size(1)):
-                            draw(self_attn_data[layer][h],
-                                 srcs if layer == self_attn_data.size(0) - 1 else [], srcs if h == 0 else [], ax=axs[layer][h])
+                    # viz encoding self attention
+                    tgt_raw = trans.pred_sents[0]
+                    attention_infor = [
+                        ("self-attn-debug", trans.self_attn[:, :, :len(trans.src_raw), :len(trans.src_raw)],
+                         trans.src_raw, trans.src_raw, 10),
+                        ("decoding-self-attn-debug", trans.decoding_self_attn[0][:, :, :len(tgt_raw), :len(tgt_raw)],
+                         ["<s>"] + tgt_raw[:-1], ["<s>"] + tgt_raw[:-1], 20),
+                        ("align-attn", torch.unsqueeze(torch.unsqueeze(trans.attns[0], 0), 0), trans.src_raw,
+                         tgt_raw[:], 6)
+                    ]
+                    for (folder_name, self_attn_data, x_stick, y_stick, base_cell) in attention_infor:
 
-                    if not os.path.isdir("{}/self-attn-debug".format(self_attn_folder_save)):
-                        os.mkdir("{}/self-attn-debug".format(self_attn_folder_save))
-                    plt.savefig('{}/self-attn-debug/sent-{}.pdf'.format(self_attn_folder_save, sent_number),
-                        bbox_inches='tight',
-                        pad_inches=0)
-                    plt.close()
+                        fig, axs = plt.subplots(self_attn_data.size(0), self_attn_data.size(1),
+                                                figsize=(int(base_cell*1.0 / self_attn_data.size(0) *
+                                                             self_attn_data.size(1)),
+                                                         base_cell))
+                        fig.suptitle('Self attention Sentence {}, {} layers, {} heads'.format(sent_number,
+                                                                                              self_attn_data.size(0),
+                                                                                              self_attn_data.size(1)
+                                                                                              ))
+                        for layer in range(0, self_attn_data.size(0)):
+                            for h in range(self_attn_data.size(1)):
+                                draw(self_attn_data[layer][h],
+                                     x_stick if layer == self_attn_data.size(0) - 1 else [],
+                                     y_stick if h == 0 else [], ax=axs[layer][h]
+                                        if self_attn_data.size(1) > 1 or  self_attn_data.size(0) > 1 else axs)
+
+                        if not os.path.isdir("{}/{}".format(self_attn_folder_save, folder_name)):
+                            os.mkdir("{}/{}".format(self_attn_folder_save, folder_name))
+                        plt.savefig('{}/{}/sent-{}.pdf'.format(self_attn_folder_save, folder_name, sent_number),
+                            bbox_inches='tight',
+                            pad_inches=0)
+                        plt.close()
+
 
 
                 if align_debug:
@@ -740,24 +756,26 @@ class Translator(object):
         batch_size = batch.batch_size
 
         # (1) Run the encoder on the src.
+
+        # customize: set state save self attention
         # set flag save self-attention
-        flag_debug_self_attn = decode_strategy.return_attention and hasattr(self.model.encoder, "transformer")
-        self_attn_data = None
+        flag_debug_self_attn = decode_strategy.return_attention and hasattr(self.model.encoder, "transformer") \
+                                        and hasattr(self.model.decoder, "transformer_layers")
         if flag_debug_self_attn:
             for layer_tf in self.model.encoder.transformer:
                 try:
                     layer_tf.save_self_attn = True
                 except:
                     logging.warning(str(layer_tf) + " dont have attribute: layer_tf.save_self_attn = True")
+
+            for layer_tf in self.model.decoder.transformer_layers:
+                try:
+                    layer_tf.save_self_attn = True
+                except:
+                    logging.warning(str(layer_tf) + " dont have attribute: layer_tf.save_self_attn = True")
+        # ===
+
         src, enc_states, memory_bank, src_lengths = self._run_encoder(batch)
-        if flag_debug_self_attn:
-            self_attn_data = []
-            for layer_tf in self.model.encoder.transformer:
-                self_attn_data.append(layer_tf.self_attn_data)
-            self_attn_data = torch.stack(self_attn_data)
-            self_attn_data = self_attn_data.transpose(0, 1)
-            for layer_tf in self.model.encoder.transformer:
-                layer_tf.clean_self_attn_data()
         self.model.decoder.init_state(src, memory_bank, enc_states)
 
         if hasattr(self.model, "enc_generator"):
@@ -789,9 +807,6 @@ class Translator(object):
                     batch, memory_bank, src_lengths, src_vocabs, use_src_map,
                     enc_states, batch_size, src)}
 
-        if self_attn_data is not None:
-            results["self-attn"] = self_attn_data
-
         # (2) prep decode_strategy. Possibly repeat src objects.
         src_map = batch.src_map if use_src_map else None
         fn_map_state, memory_bank, memory_lengths, src_map = \
@@ -813,7 +828,18 @@ class Translator(object):
                 step=step,
                 batch_offset=decode_strategy.batch_offset)
 
-            decode_strategy.advance(log_probs, attn)
+            # customize: get state self attention and clean
+            self_attn_data_decoder = None
+            if flag_debug_self_attn:
+                self_attn_data_decoder = []
+                for layer_tf in self.model.decoder.transformer_layers:
+                    self_attn_data_decoder.append(layer_tf.self_attn_data)
+                    layer_tf.clean_self_attn_data()
+                self_attn_data_decoder = torch.stack(self_attn_data_decoder)
+                self_attn_data_decoder = self_attn_data_decoder.transpose(0, 1)
+            # ===
+
+            decode_strategy.advance(log_probs, attn, self_attn=self_attn_data_decoder)
             any_finished = decode_strategy.is_finished.any()
             if any_finished:
                 decode_strategy.update_finished()
@@ -839,9 +865,23 @@ class Translator(object):
                 self.model.decoder.map_state(
                     lambda state, dim: state.index_select(dim, select_indices))
 
+        # customize: get state self attention and clean
+        if flag_debug_self_attn:
+            self_attn_data = []
+            for layer_tf in self.model.encoder.transformer:
+                self_attn_data.append(layer_tf.self_attn_data)
+            self_attn_data = torch.stack(self_attn_data)
+            self_attn_data = self_attn_data.transpose(0, 1)
+            for layer_tf in self.model.encoder.transformer:
+                layer_tf.clean_self_attn_data()
+            if self_attn_data is not None:
+                results["self-attn"] = self_attn_data
+        # ===
+
         results["scores"] = decode_strategy.scores
         results["predictions"] = decode_strategy.predictions
         results["attention"] = decode_strategy.attention
+        results["decoding-self-attn"] = decode_strategy.self_attention_final
         if self.report_align:
             results["alignment"] = self._align_forward(
                 batch, decode_strategy.predictions)

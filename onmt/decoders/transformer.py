@@ -46,6 +46,8 @@ class TransformerDecoderLayer(nn.Module):
         self.drop = nn.Dropout(dropout)
         self.full_context_alignment = full_context_alignment
         self.alignment_heads = alignment_heads
+        self.save_self_attn = False
+        self.self_attn_data = None
 
     def forward(self, *args, **kwargs):
         """ Extend _forward for (possibly) multiple decoder pass:
@@ -121,13 +123,16 @@ class TransformerDecoderLayer(nn.Module):
         input_norm = self.layer_norm_1(inputs)
 
         if isinstance(self.self_attn, MultiHeadedAttention):
-            query, _ = self.self_attn(input_norm, input_norm, input_norm,
+            query, self_attn_data = self.self_attn(input_norm, input_norm, input_norm,
                                       mask=dec_mask,
                                       layer_cache=layer_cache,
                                       attn_type="self")
         elif isinstance(self.self_attn, AverageAttention):
-            query, _ = self.self_attn(input_norm, mask=dec_mask,
+            query, self_attn_data = self.self_attn(input_norm, mask=dec_mask,
                                       layer_cache=layer_cache, step=step)
+
+        if self.save_self_attn and step is not None:
+            self.self_attn_data = self_attn_data
 
         query = self.drop(query) + inputs
 
@@ -146,6 +151,8 @@ class TransformerDecoderLayer(nn.Module):
         self.feed_forward.update_dropout(dropout)
         self.drop.p = dropout
 
+    def clean_self_attn_data(self):
+        self.self_attn_data = None
 
 class TransformerDecoder(DecoderBase):
     """The Transformer decoder from "Attention is All You Need".
