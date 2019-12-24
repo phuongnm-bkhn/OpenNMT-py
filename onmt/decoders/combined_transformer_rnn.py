@@ -55,6 +55,11 @@ class CombinedTransformerRnnDecoderLayer(nn.Module):
         self.drop = nn.Dropout(dropout)
         self.full_context_alignment = full_context_alignment
         self.alignment_heads = alignment_heads
+        self.self_attn_data = None
+        self.save_self_attn = False
+
+    def clean_self_attn_data(self):
+        self.self_attn_data = None
 
     def forward(self, *args, **kwargs):
         """ Extend _forward for (possibly) multiple decoder pass:
@@ -130,13 +135,17 @@ class CombinedTransformerRnnDecoderLayer(nn.Module):
         input_norm = self.layer_norm_1(inputs)
 
         if isinstance(self.self_attn, MultiHeadedAttention):
-            query, _ = self.self_attn(input_norm, input_norm, input_norm,
+            query, self_attn_data = self.self_attn(input_norm, input_norm, input_norm,
                                       mask=dec_mask,
                                       layer_cache=layer_cache,
                                       attn_type="self")
         elif isinstance(self.self_attn, AverageAttention):
-            query, _ = self.self_attn(input_norm, mask=dec_mask,
+            query, self_attn_data = self.self_attn(input_norm, mask=dec_mask,
                                       layer_cache=layer_cache, step=step)
+
+        # save self attention data
+        if self.save_self_attn and step is not None:
+            self.self_attn_data = self_attn_data
 
         query = self.drop(query) + inputs
 
