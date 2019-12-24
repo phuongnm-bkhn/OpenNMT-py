@@ -44,10 +44,10 @@ class CombinedTransformerRnnDecoderLayer(nn.Module):
             heads, d_model, dropout=attention_dropout)
 
         self.state = {}
-        self.feedRnnDecoder = InputFeedRNNDecoder2("LSTM", bidirectional_encoder=False, num_layers = 1,
-                                                   hidden_size=d_model, attn_type="none",
-                                                   copy_attn=False, dropout=0.01, embeddings=EmbeddingSkipped(d_model),
-                                                   reuse_copy_attn=False, copy_attn_type="none")
+        self.feed_rnn_decoder = InputFeedRNNDecoder2("LSTM", bidirectional_encoder=False, num_layers=1,
+                                                     hidden_size=d_model, attn_type="none",
+                                                     copy_attn=False, dropout=0.01, embeddings=EmbeddingSkipped(d_model),
+                                                     reuse_copy_attn=False, copy_attn_type="none")
 
         self.feed_forward = PositionwiseFeedForward(d_model, d_ff, dropout)
         self.layer_norm_1 = nn.LayerNorm(d_model, eps=1e-6)
@@ -145,7 +145,7 @@ class CombinedTransformerRnnDecoderLayer(nn.Module):
                                        mask=src_pad_mask,
                                        layer_cache=layer_cache,
                                        attn_type="context")
-        mid = self.feedRnnDecoder(mid, memory_bank.transpose(0,1), step=step)
+        mid = self.feed_rnn_decoder(mid, memory_bank.transpose(0, 1), step=step)
         mid = mid.transpose(0, 1)
 
         output = self.feed_forward(self.drop(mid) + query)
@@ -343,6 +343,7 @@ class CombinedTransformerRnnDecoder(DecoderBase):
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
 
         self.alignment_layer = alignment_layer
+        self.hidden_size = d_model
 
     @classmethod
     def from_opt(cls, opt, embeddings):
