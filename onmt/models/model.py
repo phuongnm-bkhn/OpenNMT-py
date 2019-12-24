@@ -1,4 +1,5 @@
 """ Onmt NMT Model base class definition """
+import torch
 import torch.nn as nn
 
 
@@ -45,14 +46,22 @@ class NMTModel(nn.Module):
         enc_state, memory_bank, lengths = self.encoder(src, lengths)
 
         if bptt is False:
-            if "CombinedTransformerRnnEncoder" in str(type(self.encoder)) \
-                    and "CombinedTransformerRnnDecoder" in str(type(self.decoder)):
-                for i, layer in enumerate(self.encoder.transformer):
-                    enc_final_state = layer.encoder_state["final_state"]
-                    layer.encoder_state = {}
-                    self.decoder.transformer_layers[i].feed_rnn_decoder\
-                        .init_state(src, memory_bank, enc_final_state)
-
+            if "CombinedTransformerRnnEncoder" in str(type(self.encoder)):
+                if "CombinedTransformerRnnDecoder" in str(type(self.decoder)):
+                    for i, layer in enumerate(self.encoder.transformer):
+                        enc_final_state = layer.encoder_state["final_state"]
+                        layer.encoder_state = {}
+                        self.decoder.transformer_layers[i].feed_rnn_decoder\
+                            .init_state(src, memory_bank, enc_final_state)
+                    self.decoder.init_state(src, memory_bank, enc_state)
+                elif "InputFeedRNNDecoder" in str(type(self.decoder)):
+                    enc_final_states = []
+                    for i, layer in enumerate(self.encoder.transformer):
+                        enc_final_state = layer.encoder_state["final_state"]
+                        enc_final_state = torch.cat(enc_final_state, dim=0)
+                        layer.encoder_state = {}
+                        enc_final_states.append(enc_final_state)
+                    enc_state = tuple(enc_final_states)
             self.decoder.init_state(src, memory_bank, enc_state)
         dec_out, attns = self.decoder(dec_in, memory_bank,
                                       memory_lengths=lengths,
