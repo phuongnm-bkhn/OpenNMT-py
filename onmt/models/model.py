@@ -50,14 +50,16 @@ class NMTModel(nn.Module):
                 if "CombinedTransformerRnnDecoder" in str(type(self.decoder)):
                     for i, layer in enumerate(self.encoder.transformer):
                         enc_final_state = layer.encoder_state["final_state"]
+                        enc_memory_bank = layer.encoder_state["memory_bank"]
                         layer.encoder_state = {}
                         self.decoder.transformer_layers[i].feed_rnn_decoder\
                             .init_state(src, memory_bank, enc_final_state)
-                    self.decoder.init_state(src, memory_bank, enc_state)
+                    self.decoder.init_state(src, enc_memory_bank, enc_state)
                 elif "InputFeedRNNDecoder" in str(type(self.decoder)):
                     enc_final_states = []
                     for i, layer in enumerate(self.encoder.transformer):
                         enc_final_state = layer.encoder_state["final_state"]
+                        memory_bank = layer.encoder_state["memory_bank"]
                         enc_final_state = torch.cat(enc_final_state, dim=0)
                         layer.encoder_state = {}
                         enc_final_states.append(enc_final_state)

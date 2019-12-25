@@ -761,14 +761,16 @@ class Translator(object):
             if "CombinedTransformerRnnDecoder" in str(type(self.model.decoder)):
                 for i, layer in enumerate(self.model.encoder.transformer):
                     enc_final_state = layer.encoder_state["final_state"]
+                    enc_memory_bank = layer.encoder_state["memory_bank"]
                     layer.encoder_state = {}
                     self.model.decoder.transformer_layers[i].feed_rnn_decoder \
-                        .init_state(src, memory_bank, enc_final_state)
+                        .init_state(src, enc_memory_bank, enc_final_state)
 
             elif "InputFeedRNNDecoder" in str(type(self.model.decoder)):
                 enc_final_states = []
                 for i, layer in enumerate(self.model.encoder.transformer):
                     enc_final_state = layer.encoder_state["final_state"]
+                    memory_bank = layer.encoder_state["memory_bank"]
                     enc_final_state = torch.cat(enc_final_state, dim=0)
                     layer.encoder_state = {}
                     enc_final_states.append(enc_final_state)
