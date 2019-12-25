@@ -757,8 +757,24 @@ class Translator(object):
         # ===
 
         src, enc_states, memory_bank, src_lengths = self._run_encoder(batch)
-        self.model.decoder.init_state(src, memory_bank, enc_states)
+        if "CombinedTransformerRnnEncoder" in str(type(self.model.encoder)):
+            if "CombinedTransformerRnnDecoder" in str(type(self.model.decoder)):
+                for i, layer in enumerate(self.model.encoder.transformer):
+                    enc_final_state = layer.encoder_state["final_state"]
+                    layer.encoder_state = {}
+                    self.model.decoder.transformer_layers[i].feed_rnn_decoder \
+                        .init_state(src, memory_bank, enc_final_state)
 
+            elif "InputFeedRNNDecoder" in str(type(self.model.decoder)):
+                enc_final_states = []
+                for i, layer in enumerate(self.model.encoder.transformer):
+                    enc_final_state = layer.encoder_state["final_state"]
+                    enc_final_state = torch.cat(enc_final_state, dim=0)
+                    layer.encoder_state = {}
+                    enc_final_states.append(enc_final_state)
+                enc_states = tuple(enc_final_states)
+
+        self.model.decoder.init_state(src, memory_bank, enc_states)
         if hasattr(self.model, "enc_generator"):
             enc_label_scores = self.model.enc_generator(memory_bank.view(-1, memory_bank.size(2))) \
                 .view(memory_bank.shape[0], memory_bank.shape[1], -1)
