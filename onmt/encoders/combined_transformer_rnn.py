@@ -56,11 +56,12 @@ class CombinedTransformerRnnEncoderLayer(nn.Module):
                                                  mask=mask, attn_type="self")
         if self.save_self_attn:
             self.self_attn_data = self_attn_data
-        final_state, memory_bank, rnn_lengths = self.lstm_layer(context.transpose(0, 1), lengths)
+        final_state, memory_bank, rnn_lengths = self.lstm_layer(input_norm.transpose(0, 1), lengths)
         self.encoder_state["final_state"] = final_state
         self.encoder_state["memory_bank"] = memory_bank
+        context = memory_bank.transpose(0, 1) + context
 
-        context = memory_bank.transpose(0, 1)
+        # context = memory_bank.transpose(0, 1)
         out = self.dropout(context) + inputs
         return self.feed_forward(out)
 
