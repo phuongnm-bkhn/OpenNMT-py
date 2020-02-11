@@ -28,8 +28,8 @@ class CombinedTransformerRnnEncoderLayer(nn.Module):
             heads, d_model, dropout=attention_dropout,
             max_relative_positions=max_relative_positions)
         self.feed_forward = PositionwiseFeedForward(d_model, d_ff, dropout)
-        self.lstm_layer = RNNEncoder("LSTM", bidirectional=True, num_layers=1,
-                                     hidden_size=d_model, dropout=0.5,
+        self.lstm_layer = RNNEncoder("LSTM", bidirectional=True, num_layers=2,
+                                     hidden_size=d_model, dropout=0.1,
                                      embeddings=EmbeddingSkipped(d_model),
                                      use_bridge=False)
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
@@ -56,12 +56,12 @@ class CombinedTransformerRnnEncoderLayer(nn.Module):
                                                  mask=mask, attn_type="self")
         if self.save_self_attn:
             self.self_attn_data = self_attn_data
-        final_state, memory_bank, rnn_lengths = self.lstm_layer(input_norm.transpose(0, 1), lengths)
+        final_state, memory_bank, rnn_lengths = self.lstm_layer(context.transpose(0, 1), lengths)
         self.encoder_state["final_state"] = final_state
         self.encoder_state["memory_bank"] = memory_bank
-        context = memory_bank.transpose(0, 1) + context
+        #context = memory_bank.transpose(0, 1) + context
 
-        # context = memory_bank.transpose(0, 1)
+        context = memory_bank.transpose(0, 1)
         out = self.dropout(context) + inputs
         return self.feed_forward(out)
 

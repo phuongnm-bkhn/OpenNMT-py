@@ -461,11 +461,11 @@ class Translator(object):
                         self.logger.info(output)
                     else:
                         os.write(1, output.encode('utf-8'))
-                    if not self.verbose:
-                        sent_number = next(counter)
-                    viz_attention(self_attn_folder_save, "align-attn",
-                                  torch.unsqueeze(torch.unsqueeze(trans.attns[0][:, :len(srcs)], 0), 0),
-                                  srcs, trans.pred_sents[0], base_cell=6, sent_number=sent_number)
+                    #if not self.verbose:
+                    #    sent_number = next(counter)
+                    #viz_attention(self_attn_folder_save, "align-attn",
+                    #              torch.unsqueeze(torch.unsqueeze(trans.attns[0][:, :len(srcs)], 0), 0),
+                    #              srcs, trans.pred_sents[0], base_cell=6, sent_number=sent_number)
                 if self_attn_debug:
                     if not self.verbose:
                         sent_number = next(counter)
