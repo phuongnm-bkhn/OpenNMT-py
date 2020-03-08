@@ -21,17 +21,21 @@ class CombinedTransformerRnnEncoderLayer(nn.Module):
     """
 
     def __init__(self, d_model, heads, d_ff, dropout, attention_dropout,
-                 max_relative_positions=0):
+                 max_relative_positions=0, use_rnn=True):
         super(CombinedTransformerRnnEncoderLayer, self).__init__()
 
         self.self_attn = MultiHeadedAttention(
             heads, d_model, dropout=attention_dropout,
             max_relative_positions=max_relative_positions)
         self.feed_forward = PositionwiseFeedForward(d_model, d_ff, dropout)
-        self.lstm_layer = RNNEncoder("LSTM", bidirectional=True, num_layers=2,
-                                     hidden_size=d_model, dropout=0.1,
-                                     embeddings=EmbeddingSkipped(d_model),
-                                     use_bridge=False)
+        if use_rnn == True:
+            self.lstm_layer = RNNEncoder("LSTM", bidirectional=True, num_layers=2,
+                                         hidden_size=d_model, dropout=0.1,
+                                         embeddings=EmbeddingSkipped(d_model),
+                                         use_bridge=False)
+        else:
+            self.lstm_layer = None
+
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
         self.dropout = nn.Dropout(dropout)
         self.save_self_attn = False
@@ -56,12 +60,14 @@ class CombinedTransformerRnnEncoderLayer(nn.Module):
                                                  mask=mask, attn_type="self")
         if self.save_self_attn:
             self.self_attn_data = self_attn_data
-        final_state, memory_bank, rnn_lengths = self.lstm_layer(context.transpose(0, 1), lengths)
-        self.encoder_state["final_state"] = final_state
-        self.encoder_state["memory_bank"] = memory_bank
-        #context = memory_bank.transpose(0, 1) + context
+        if self.lstm_layer is not None:
+            final_state, memory_bank, rnn_lengths = self.lstm_layer(context.transpose(0, 1), lengths)
+            self.encoder_state["final_state"] = final_state
+            self.encoder_state["memory_bank"] = memory_bank
+            #context = memory_bank.transpose(0, 1) + context
 
-        context = memory_bank.transpose(0, 1)
+            context = memory_bank.transpose(0, 1)
+
         out = self.dropout(context) + inputs
         return self.feed_forward(out)
 
@@ -126,7 +132,7 @@ class CombinedTransformerRnnEncoder(EncoderBase):
         self.transformer = nn.ModuleList(
             [CombinedTransformerRnnEncoderLayer(
                 d_model, heads, d_ff, dropout, attention_dropout,
-                max_relative_positions=max_relative_positions)
+                max_relative_positions=max_relative_positions, use_rnn=True if i < 2 else False)
                 for i in range(num_layers)])
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
 
