@@ -80,7 +80,8 @@ DEFAULT_SCORERS = [PPLScorer(), AccuracyScorer(), AccuracySentenceLevelScorer()]
 
 SCORER_BUILDER = {
     "ppl": PPLScorer,
-    "accuracy": AccuracyScorer
+    "accuracy": AccuracyScorer,
+    "accuracy_sent": AccuracySentenceLevelScorer
 }
 
 
