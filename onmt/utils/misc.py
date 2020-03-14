@@ -168,9 +168,9 @@ def draw(data, x, y, ax):
 def viz_attention(self_attn_folder_save, folder_name, self_attn_data, x_stick, y_stick, base_cell, sent_number=""):
 
     fig, axs = plt.subplots(self_attn_data.size(0), self_attn_data.size(1),
-                            figsize=(int(base_cell*1.0 / self_attn_data.size(0) *
+                            figsize=(int(max(len(x_stick), len(y_stick)) * base_cell*1.0 / self_attn_data.size(0) *
                                          self_attn_data.size(1)),
-                                     base_cell))
+                                     int(max(len(x_stick), len(y_stick)) * base_cell)))
     if self_attn_data.size(1) > 1:
         fig.suptitle('Self attention Sentence {}, {} layers, {} heads'.format(sent_number,
                                                                               self_attn_data.size(0),
