@@ -2,6 +2,7 @@ import torch.nn as nn
 
 from onmt.encoders.encoder import EncoderBase
 from onmt.encoders.rnn_encoder import RNNEncoder
+from onmt.encoders.transformer import TransformerEncoderLayer
 from onmt.modules import MultiHeadedAttention
 from onmt.modules.position_ffn import PositionwiseFeedForward
 from onmt.utils.misc import sequence_mask
@@ -28,10 +29,10 @@ class CombinedTransformerRnnEncoderLayer(nn.Module):
             heads, d_model, dropout=attention_dropout,
             max_relative_positions=max_relative_positions)
         self.feed_forward = PositionwiseFeedForward(d_model, d_ff, dropout)
-        self.lstm_layer = RNNEncoder("LSTM", bidirectional=True, num_layers=2,
-                                     hidden_size=d_model, dropout=0.1,
-                                     embeddings=EmbeddingSkipped(d_model),
-                                     use_bridge=False)
+        self.lstm_layer = None # RNNEncoder("LSTM", bidirectional=True, num_layers=2,
+        #                              hidden_size=d_model, dropout=0.1,
+        #                              embeddings=EmbeddingSkipped(d_model),
+        #                              use_bridge=False)
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
         self.dropout = nn.Dropout(dropout)
         self.save_self_attn = False
@@ -56,12 +57,12 @@ class CombinedTransformerRnnEncoderLayer(nn.Module):
                                                  mask=mask, attn_type="self")
         if self.save_self_attn:
             self.self_attn_data = self_attn_data
-        final_state, memory_bank, rnn_lengths = self.lstm_layer(context.transpose(0, 1), lengths)
-        self.encoder_state["final_state"] = final_state
-        self.encoder_state["memory_bank"] = memory_bank
+        # final_state, memory_bank, rnn_lengths = self.lstm_layer(context.transpose(0, 1), lengths)
+        # self.encoder_state["final_state"] = final_state
+        # self.encoder_state["memory_bank"] = memory_bank
         #context = memory_bank.transpose(0, 1) + context
 
-        context = memory_bank.transpose(0, 1)
+        # context = memory_bank.transpose(0, 1)
         out = self.dropout(context) + inputs
         return self.feed_forward(out)
 
@@ -123,8 +124,13 @@ class CombinedTransformerRnnEncoder(EncoderBase):
         super(CombinedTransformerRnnEncoder, self).__init__()
 
         self.embeddings = embeddings
+        self.rnn = RNNEncoder("LSTM", bidirectional=True, num_layers=2,
+                              hidden_size=d_model, dropout=0.3,
+                              embeddings=embeddings,
+                              use_bridge=False)
+
         self.transformer = nn.ModuleList(
-            [CombinedTransformerRnnEncoderLayer(
+            [TransformerEncoderLayer(
                 d_model, heads, d_ff, dropout, attention_dropout,
                 max_relative_positions=max_relative_positions)
                 for i in range(num_layers)])
@@ -148,13 +154,14 @@ class CombinedTransformerRnnEncoder(EncoderBase):
         """See :func:`EncoderBase.forward()`"""
         self._check_args(src, lengths)
 
-        emb = self.embeddings(src)
+        final_state, memory_bank, rnn_lengths = self.rnn(src, lengths)
+        emb = memory_bank
 
         out = emb.transpose(0, 1).contiguous()
         mask = ~sequence_mask(lengths).unsqueeze(1)
         # Run the forward pass of every layer of the tranformer.
         for layer in self.transformer:
-            out = layer(out, mask, lengths)
+            out = layer(out, mask)
         out = self.layer_norm(out)
 
         return emb, out.transpose(0, 1).contiguous(), lengths

@@ -250,6 +250,8 @@ def preprocess_opts(parser):
                    "each shard has shard_size samples")
     group.add('--marking_condition', '-marking_condition', type=str, default=None,
               help="pattern to match label in marking step")
+    group.add('--marking_word_frequency_limit', '-marking_word_frequency_limit', type=int, default=5,
+              help="word frequency limit for marking pre-process")
     group.add('--marking_mechanism', '-marking_mechanism', action="store_true", default=False,
               help="Marking mechanism when build model.")
 
@@ -762,6 +764,8 @@ def translate_opts(parser):
 
     group.add('--marking_condition', '-marking_condition', type=str, default=None,
               help="regex filter marking token.")
+    group.add('--marking_word_frequency_limit', '-marking_word_frequency_limit', type=int, default=5,
+              help="word frequency limit for marking pre-process")
     group.add('--marking_mechanism', '-marking_mechanism', action="store_true", default=False,
               help="Marking mechanism when build model.")
 

@@ -110,7 +110,8 @@ class Dataset(TorchtextDataset):
     """
 
     def __init__(self, fields, readers, data, dirs, sort_key,
-                 filter_pred=None, marking_condition=None):
+                 filter_pred=None, marking_condition=None,
+                 existing_fields=None, marking_word_frequency_limit=5):
         self.sort_key = sort_key
         can_copy = 'src_map' in fields and 'alignment' in fields
 
@@ -123,7 +124,10 @@ class Dataset(TorchtextDataset):
             for i in range(count_sample):
                 src_str, tgt_str = data[0][1][i], data[1][1][i]
                 encode_words, decode_words, decode_transformed, encode_labels = \
-                    Dataset.matching_enc_label(src_str.decode("utf-8") , tgt_str.decode("utf-8"), marking_condition)
+                    Dataset.matching_enc_label(src_str.decode("utf-8"), tgt_str.decode("utf-8"), marking_condition,
+                                               word_frequency=existing_fields["src"].base_field.vocab.freqs if
+                                               existing_fields is not None and "src" in existing_fields else None,
+                                               word_frequency_limit=marking_word_frequency_limit)
                 data[1][1][i] = (" ".join(decode_transformed)).encode('utf-8')
                 data[0][1][i] = (" ".join(encode_words)).encode('utf-8')
                 transformed_data.append((encode_words, decode_words, decode_transformed, encode_labels))
@@ -188,7 +192,9 @@ class Dataset(TorchtextDataset):
                 dirs.append(field["dir"])
         return readers, data, dirs
 
-    def matching_enc_label(encode_str: str, decode_str: str, marking_condition=None):
+    @staticmethod
+    def matching_enc_label(encode_str: str, decode_str: str, marking_condition=None,
+                           word_frequency=None, word_frequency_limit=None):
         encode_str = encode_str.strip()
         decode_str = decode_str.strip()
 
@@ -203,6 +209,10 @@ class Dataset(TorchtextDataset):
             for w in w_intersection2:
                 if not re.match(re.compile(marking_condition), w):
                     w_intersection.remove(w)
+                if w in w_intersection and \
+                        word_frequency is not None and word_frequency_limit is not None:
+                    if word_frequency.get(w, 0) > word_frequency_limit:
+                        w_intersection.remove(w)
 
         last_idx = -1
         elements = []
