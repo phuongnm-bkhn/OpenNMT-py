@@ -54,7 +54,7 @@ class CombinedTransformerRnnEncoderLayer(nn.Module):
         """
         input_norm = self.layer_norm(inputs)
         input_rnn_norm = self.layer_norm(inputs_rnn)
-        context, self_attn_data = self.self_attn(input_rnn_norm, input_rnn_norm, input_norm,
+        context, self_attn_data = self.self_attn(input_norm, input_norm, input_rnn_norm,
                                                  mask=mask, attn_type="self")
         if self.save_self_attn:
             self.self_attn_data = self_attn_data
@@ -127,7 +127,7 @@ class CombinedTransformerRnnEncoder(EncoderBase):
         self.embeddings = embeddings
         self.rnn = RNNEncoder("LSTM", bidirectional=True, num_layers=2,
                               hidden_size=d_model, dropout=0.3,
-                              embeddings=embeddings,
+                              embeddings=EmbeddingSkipped(embedding_size=d_model),
                               use_bridge=False)
 
         self.transformer = nn.ModuleList(
@@ -155,17 +155,19 @@ class CombinedTransformerRnnEncoder(EncoderBase):
         """See :func:`EncoderBase.forward()`"""
         self._check_args(src, lengths)
 
-        final_state, memory_bank, rnn_lengths = self.rnn(src, lengths)
-        emb = memory_bank
+        emb, emb_v_wo_pe = self.embeddings(src, use_pe=False)
 
-        emb_v = self.embeddings(src)
-        emb_v = emb_v.transpose(0, 1).contiguous()
+        final_state, memory_bank, rnn_lengths = self.rnn(emb_v_wo_pe, lengths)
+        h_rnn = memory_bank
 
-        out = emb.transpose(0, 1).contiguous()
+        emb_v = emb.transpose(0, 1).contiguous()
+        h_rnn = h_rnn.transpose(0, 1).contiguous()
+
         mask = ~sequence_mask(lengths).unsqueeze(1)
         # Run the forward pass of every layer of the tranformer.
         for layer in self.transformer:
-            out = layer(emb_v, out, mask)
+            out = layer(emb_v, h_rnn, mask)
+            emb_v = out
         out = self.layer_norm(out)
 
         return emb, out.transpose(0, 1).contiguous(), lengths

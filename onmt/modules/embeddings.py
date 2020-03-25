@@ -257,7 +257,7 @@ class Embeddings(nn.Module):
             else:
                 self.word_lut.weight.data.copy_(pretrained)
 
-    def forward(self, source, step=None):
+    def forward(self, source, step=None, use_pe=True):
         """Computes the embeddings for words and features.
 
         Args:
@@ -266,16 +266,20 @@ class Embeddings(nn.Module):
         Returns:
             FloatTensor: Word embeddings ``(len, batch, embedding_size)``
         """
-
+        emb_wo_pe = None
         if self.position_encoding:
             for i, module in enumerate(self.make_embedding._modules.values()):
                 if i == len(self.make_embedding._modules.values()) - 1:
                     source = module(source, step=step)
                 else:
                     source = module(source)
+                    if not use_pe and i == len(self.make_embedding._modules.values()) - 2:
+                        emb_wo_pe = source
         else:
             source = self.make_embedding(source)
 
+        if not use_pe:
+            return source, emb_wo_pe
         return source
 
     def update_dropout(self, dropout):
