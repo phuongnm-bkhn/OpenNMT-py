@@ -170,7 +170,7 @@ class CombinedTransformerRnnEncoder(EncoderBase):
             emb_v = out
         out = self.layer_norm(out)
 
-        return emb, out.transpose(0, 1).contiguous(), lengths
+        return emb, [out.transpose(0, 1).contiguous(), h_rnn], lengths
 
     def update_dropout(self, dropout, attention_dropout):
         self.embeddings.update_dropout(dropout)

@@ -137,7 +137,13 @@ class TransformerDecoderLayer(nn.Module):
         query = self.drop(query) + inputs
 
         query_norm = self.layer_norm_2(query)
-        mid, attns = self.context_attn(memory_bank, memory_bank, query_norm,
+
+        if isinstance(memory_bank, list) and len(memory_bank) == 2:
+            k = memory_bank[0]
+            v = memory_bank[1]
+        else:
+            k = v = memory_bank
+        mid, attns = self.context_attn(k, v, query_norm,
                                        mask=src_pad_mask,
                                        layer_cache=layer_cache,
                                        attn_type="context")
@@ -265,7 +271,12 @@ class TransformerDecoder(DecoderBase):
         assert emb.dim() == 3  # len x batch x embedding_dim
 
         output = emb.transpose(0, 1).contiguous()
-        src_memory_bank = memory_bank.transpose(0, 1).contiguous()
+
+        if isinstance(memory_bank, list) and len(memory_bank) == 2:
+            memory_bank[0] = memory_bank[0].transpose(0, 1).contiguous()
+            src_memory_bank = memory_bank
+        else:
+            src_memory_bank = memory_bank.transpose(0, 1).contiguous()
 
         pad_idx = self.embeddings.word_padding_idx
         src_lens = kwargs["memory_lengths"]
