@@ -946,3 +946,9 @@ def build_dataset_iter(corpus_type, fields, opt, is_train=True, multi=False):
 def build_dataset_iter_multiple(train_shards, fields, opt):
     return MultipleDatasetIterator(
         train_shards, fields, "cuda" if opt.gpu_ranks else "cpu", opt)
+
+def update_new_vocab_for_pretrained(pretrained_vocab, new_vocab):
+    print('update_new_vocab_for_pretrained')
+    # pretrained_vocab["src"].base_field.vocab.extend(new_vocab["src"].base_field.vocab)
+    pretrained_vocab["tgt"] = new_vocab["tgt"]
+    return pretrained_vocab

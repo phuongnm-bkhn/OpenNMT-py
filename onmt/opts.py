@@ -591,6 +591,8 @@ def train_opts(parser):
               help="Using grayscale image can training "
                    "model faster and smaller")
 
+    group.add('--src_pretrained', '-src_pretrained', default='',
+              help="Using trained encoder")
 
 def translate_opts(parser):
     """ Translation / inference options """

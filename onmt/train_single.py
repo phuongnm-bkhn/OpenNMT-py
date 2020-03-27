@@ -5,7 +5,7 @@ import os
 import torch
 
 from onmt.inputters.inputter import build_dataset_iter, \
-    load_old_vocab, old_style_vocab, build_dataset_iter_multiple
+    load_old_vocab, old_style_vocab, build_dataset_iter_multiple, update_new_vocab_for_pretrained
 from onmt.model_builder import build_model
 from onmt.utils.optimizers import Optimizer
 from onmt.utils.misc import set_random_seed
@@ -47,9 +47,9 @@ def main(opt, device_id, batch_queue=None, semaphore=None):
     assert len(opt.accum_count) == len(opt.accum_steps), \
         'Number of accum_count values must match number of accum_steps'
     # Load checkpoint if we resume from a previous training.
-    if opt.train_from:
+    if opt.train_from or opt.src_pretrained:
         logger.info('Loading checkpoint from %s' % opt.train_from)
-        checkpoint = torch.load(opt.train_from,
+        checkpoint = torch.load(opt.train_from if len(opt.train_from) > 0 else opt.src_pretrained,
                                 map_location=lambda storage, loc: storage)
         model_opt = ArgumentParser.ckpt_model_opts(checkpoint["opt"])
         ArgumentParser.update_model_opts(model_opt)
@@ -82,6 +82,24 @@ def main(opt, device_id, batch_queue=None, semaphore=None):
 
     # Build model.
     model = build_model(model_opt, opt, fields, checkpoint)
+
+    if len(opt.src_pretrained) > 0:
+        vocab_new = torch.load(opt.data + '.vocab.pt')
+        vocab = update_new_vocab_for_pretrained(vocab, vocab_new)
+        model_new = build_model(model_opt, opt, vocab, None)
+        model_new.encoder = model.encoder
+
+        def disable_grad(m):
+            if hasattr(m, 'weight'):
+                m.weight.requires_grad = False
+            return m
+
+        model_new.encoder.apply(disable_grad)
+
+        model = model_new
+        print(model)
+        checkpoint = None
+
     n_params, enc, dec = _tally_parameters(model)
     logger.info('encoder: %d' % enc)
     logger.info('decoder: %d' % dec)

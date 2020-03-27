@@ -12,7 +12,7 @@ from onmt.utils.logging import init_logger, logger
 from onmt.train_single import main as single_main
 from onmt.utils.parse import ArgumentParser
 from onmt.inputters.inputter import build_dataset_iter, \
-    load_old_vocab, old_style_vocab, build_dataset_iter_multiple
+    load_old_vocab, old_style_vocab, build_dataset_iter_multiple, update_new_vocab_for_pretrained
 
 from itertools import cycle
 
@@ -31,6 +31,15 @@ def train(opt):
                                 map_location=lambda storage, loc: storage)
         logger.info('Loading vocab from checkpoint at %s.' % opt.train_from)
         vocab = checkpoint['vocab']
+
+    elif opt.src_pretrained != '':
+        logger.info('Loading pretrained from %s' % opt.src_pretrained)
+        checkpoint = torch.load(opt.src_pretrained,
+                                map_location=lambda storage, loc: storage)
+        logger.info('Loading vocab from checkpoint at %s.' % opt.src_pretrained)
+        pretrained_vocab = checkpoint['vocab']
+        new_vocab = torch.load(opt.data + '.vocab.pt')
+        vocab = update_new_vocab_for_pretrained(pretrained_vocab, new_vocab)
     else:
         vocab = torch.load(opt.data + '.vocab.pt')
 
