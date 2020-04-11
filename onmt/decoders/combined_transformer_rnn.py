@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 
 from onmt.decoders.decoder import DecoderBase, RNNDecoderBase
+from onmt.decoders.transformer import TransformerDecoderLayer
+from onmt.encoders import RNNEncoder
 from onmt.encoders.combined_transformer_rnn import EmbeddingSkipped
 from onmt.models.stacked_rnn import StackedLSTM, StackedGRU
 from onmt.modules import MultiHeadedAttention, AverageAttention
@@ -44,10 +46,10 @@ class CombinedTransformerRnnDecoderLayer(nn.Module):
             heads, d_model, dropout=attention_dropout)
 
         self.state = {}
-        self.feed_rnn_decoder = InputFeedRNNDecoder2("LSTM", bidirectional_encoder=False, num_layers=1,
-                                                     hidden_size=d_model, attn_type="none",
-                                                     copy_attn=False, dropout=0.01, embeddings=EmbeddingSkipped(d_model),
-                                                     reuse_copy_attn=False, copy_attn_type="none")
+        # self.rnn_decoder = RNNEncoder("LSTM", bidirectional=True, num_layers=2,
+        #                               hidden_size=d_model, dropout=0.3,
+        #                               embeddings=EmbeddingSkipped(embedding_size=d_model),
+        #                               use_bridge=False)
 
         self.feed_forward = PositionwiseFeedForward(d_model, d_ff, dropout)
         self.layer_norm_1 = nn.LayerNorm(d_model, eps=1e-6)
@@ -154,7 +156,6 @@ class CombinedTransformerRnnDecoderLayer(nn.Module):
                                        mask=src_pad_mask,
                                        layer_cache=layer_cache,
                                        attn_type="context")
-        mid = self.feed_rnn_decoder(mid, memory_bank.transpose(0, 1), step=step)
         mid = mid.transpose(0, 1)
 
         output = self.feed_forward(self.drop(mid) + query)
@@ -166,131 +167,6 @@ class CombinedTransformerRnnDecoderLayer(nn.Module):
         self.context_attn.update_dropout(attention_dropout)
         self.feed_forward.update_dropout(dropout)
         self.drop.p = dropout
-
-
-class InputFeedRNNDecoder2(RNNDecoderBase):
-    """Input feeding based decoder.
-
-    See :class:`~onmt.decoders.decoder.RNNDecoderBase` for options.
-
-    Based around the input feeding approach from
-    "Effective Approaches to Attention-based Neural Machine Translation"
-    :cite:`Luong2015`
-
-
-    .. mermaid::
-
-       graph BT
-          A[Input n-1]
-          AB[Input n]
-          subgraph RNN
-            E[Pos n-1]
-            F[Pos n]
-            E --> F
-          end
-          G[Encoder]
-          H[memory_bank n-1]
-          A --> E
-          AB --> F
-          E --> H
-          G --> H
-    """
-
-    def forward(self, transform_emb, memory_bank, memory_lengths=None, step=None,
-                **kwargs):
-        """
-        Args:
-            tgt (LongTensor): sequences of padded tokens
-                 ``(tgt_len, batch, nfeats)``.
-            memory_bank (FloatTensor): vectors from the encoder
-                 ``(src_len, batch, hidden)``.
-            memory_lengths (LongTensor): the padded source lengths
-                ``(batch,)``.
-
-        Returns:
-            (FloatTensor, dict[str, FloatTensor]):
-
-            * dec_outs: output from the decoder (after attn)
-              ``(tgt_len, batch, hidden)``.
-        """
-
-        dec_state, dec_outs  = self._run_forward_pass(transform_emb, memory_bank, memory_lengths)
-
-        # Update the state with the result.
-        if not isinstance(dec_state, tuple):
-            dec_state = (dec_state,)
-        self.state["hidden"] = dec_state
-        self.state["input_feed"] = dec_outs[-1].unsqueeze(0)
-
-        # Concatenates sequence of tensors along a new dimension.
-        # NOTE: v0.3 to 0.4: dec_outs / attns[*] may not be list
-        #       (in particular in case of SRU) it was not raising error in 0.3
-        #       since stack(Variable) was allowed.
-        #       In 0.4, SRU returns a tensor that shouldn't be stacke
-        if type(dec_outs) == list:
-            dec_outs = torch.stack(dec_outs)
-
-        return dec_outs
-
-    def _run_forward_pass(self, transform_emb, memory_bank, memory_lengths=None):
-        """
-        See StdRNNDecoder._run_forward_pass() for description
-        of arguments and return values.
-        """
-        # Additional args check.
-        batch_size = memory_bank.size(1)
-        self.state["coverage"] = None
-        self.state["input_feed"] = \
-            memory_bank.transpose(0,1)[0].data.new(batch_size, self.hidden_size)\
-                .zero_().unsqueeze(0)
-        self.state["hidden"] = (
-            memory_bank.transpose(0,1)[0].data.new(batch_size, self.hidden_size) \
-                .zero_().unsqueeze(0),
-            memory_bank.transpose(0,1)[0].data.new(batch_size, self.hidden_size) \
-                .zero_().unsqueeze(0))
-        input_feed = self.state["input_feed"].squeeze(0)
-
-        input_feed_batch, _ = input_feed.size()
-        # aeq(tgt_batch, input_feed_batch)
-        # END Additional args check.
-
-        dec_outs = []
-
-        emb = transform_emb.transpose(0,1)
-        assert emb.dim() == 3  # len x batch x embedding_dim
-
-        dec_state = self.state["hidden"]
-
-        # Input feed concatenates hidden state with
-        # input at every time step.
-        for emb_t in emb.split(1):
-            decoder_input = torch.cat([emb_t.squeeze(0), input_feed], 1)
-            rnn_output, dec_state = self.rnn(decoder_input, dec_state)
-
-            decoder_output = rnn_output
-            # decoder_output = self.dropout(decoder_output)
-            input_feed = decoder_output
-            dec_outs += [decoder_output]
-
-        return dec_state, dec_outs
-
-    def _build_rnn(self, rnn_type, input_size,
-                   hidden_size, num_layers, dropout):
-        assert rnn_type != "SRU", "SRU doesn't support input feed! " \
-                                  "Please set -input_feed 0!"
-        stacked_cell = StackedLSTM if rnn_type == "LSTM" else StackedGRU
-        return stacked_cell(num_layers, input_size, hidden_size, dropout)
-
-    @property
-    def _input_size(self):
-        """Using input feed by concatenating input with attention vectors."""
-        return self.embeddings.embedding_size + self.hidden_size
-
-    def update_dropout(self, dropout):
-        self.dropout.p = dropout
-        self.rnn.dropout.p = dropout
-        self.embeddings.update_dropout(dropout)
-
 
 class CombinedTransformerRnnDecoder(DecoderBase):
     """The Transformer decoder from "Attention is All You Need".
@@ -337,13 +213,18 @@ class CombinedTransformerRnnDecoder(DecoderBase):
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
 
         self.transformer_layers = nn.ModuleList(
-            [CombinedTransformerRnnDecoderLayer(d_model, heads, d_ff, dropout,
+            [TransformerDecoderLayer(d_model, heads, d_ff, dropout,
                                      attention_dropout, self_attn_type=self_attn_type,
                                      max_relative_positions=max_relative_positions,
                                      aan_useffn=aan_useffn,
                                      full_context_alignment=full_context_alignment,
                                      alignment_heads=alignment_heads)
              for i in range(num_layers)])
+
+        self.rnn = RNNEncoder("LSTM", bidirectional=True, num_layers=2,
+                              hidden_size=d_model, dropout=0.3,
+                              embeddings=EmbeddingSkipped(d_model),
+                              use_bridge=False)
 
         # previously, there was a GlobalAttention module here for copy
         # attention. But it was never actually used -- the "copy" attention
@@ -406,6 +287,9 @@ class CombinedTransformerRnnDecoder(DecoderBase):
         assert emb.dim() == 3  # len x batch x embedding_dim
 
         output = emb.transpose(0, 1).contiguous()
+        final_state, rnn_hidden, rnn_lengths = self.rnn(output)
+        output = rnn_hidden
+
         src_memory_bank = memory_bank.transpose(0, 1).contiguous()
 
         pad_idx = self.embeddings.word_padding_idx

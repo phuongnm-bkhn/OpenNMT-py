@@ -41,7 +41,7 @@ class CombinedTransformerRnnEncoderLayer(nn.Module):
         # save state for RNN sub-module
         self.encoder_state = {}
 
-    def forward(self, inputs, inputs_rnn, mask):
+    def forward(self, inputs, mask):
         """
         Args:
             inputs (FloatTensor): ``(batch_size, src_len, model_dim)``
@@ -53,8 +53,7 @@ class CombinedTransformerRnnEncoderLayer(nn.Module):
             * outputs ``(batch_size, src_len, model_dim)``
         """
         input_norm = self.layer_norm(inputs)
-        input_rnn_norm = self.layer_norm(inputs_rnn)
-        context, self_attn_data = self.self_attn(input_rnn_norm, input_rnn_norm, input_norm,
+        context, self_attn_data = self.self_attn(input_norm, input_norm, input_norm,
                                                  mask=mask, attn_type="self")
         if self.save_self_attn:
             self.self_attn_data = self_attn_data
@@ -158,14 +157,11 @@ class CombinedTransformerRnnEncoder(EncoderBase):
         final_state, memory_bank, rnn_lengths = self.rnn(src, lengths)
         emb = memory_bank
 
-        emb_v = self.embeddings(src)
-        emb_v = emb_v.transpose(0, 1).contiguous()
-
         out = emb.transpose(0, 1).contiguous()
         mask = ~sequence_mask(lengths).unsqueeze(1)
         # Run the forward pass of every layer of the tranformer.
         for layer in self.transformer:
-            out = layer(emb_v, out, mask)
+            out = layer(out, mask)
         out = self.layer_norm(out)
 
         return emb, out.transpose(0, 1).contiguous(), lengths
