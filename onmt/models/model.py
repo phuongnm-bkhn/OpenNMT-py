@@ -48,13 +48,14 @@ class NMTModel(nn.Module):
         if bptt is False:
             if "CombinedTransformerRnnEncoder" in str(type(self.encoder)):
                 if "CombinedTransformerRnnDecoder" in str(type(self.decoder)):
-                    for i, layer in enumerate(self.encoder.transformer):
-                        enc_final_state = layer.encoder_state["final_state"]
-                        enc_memory_bank = layer.encoder_state["memory_bank"]
-                        layer.encoder_state = {}
-                        self.decoder.transformer_layers[i].feed_rnn_decoder\
-                            .init_state(src, memory_bank, enc_final_state)
-                    self.decoder.init_state(src, enc_memory_bank, enc_state)
+                    pass
+                    # for i, layer in enumerate(self.encoder.transformer):
+                    #     enc_final_state = layer.encoder_state["final_state"]
+                    #     enc_memory_bank = layer.encoder_state["memory_bank"]
+                    #     layer.encoder_state = {}
+                    #     self.decoder.transformer_layers[i].feed_rnn_decoder\
+                    #         .init_state(src, memory_bank, enc_final_state)
+                    # self.decoder.init_state(src, enc_memory_bank, enc_state)
                 elif "InputFeedRNNDecoder" in str(type(self.decoder)):
                     enc_final_states = []
                     for i, layer in enumerate(self.encoder.transformer):
