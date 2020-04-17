@@ -31,12 +31,13 @@ class TransformerEncoderLayer(nn.Module):
             heads, d_model, dropout=attention_dropout,
             max_relative_positions=max_relative_positions)
         self.feed_forward = PositionwiseFeedForward(d_model, d_ff, dropout)
-        self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
+        self.layer_norm_q = nn.LayerNorm(d_model, eps=1e-6)
+        self.layer_norm_kv = nn.LayerNorm(d_model, eps=1e-6)
         self.dropout = nn.Dropout(dropout)
         self.save_self_attn = False
         self.self_attn_data = None
 
-    def forward(self, inputs, mask):
+    def forward(self, inputs_q, inputs_kv, mask):
         """
         Args:
             inputs (FloatTensor): ``(batch_size, src_len, model_dim)``
@@ -47,13 +48,14 @@ class TransformerEncoderLayer(nn.Module):
 
             * outputs ``(batch_size, src_len, model_dim)``
         """
-        input_norm = self.layer_norm(inputs)
-        context, self_attn_data = self.self_attn(input_norm, input_norm, input_norm,
+        input_norm_kv = self.layer_norm_kv(inputs_kv)
+        input_norm_q = self.layer_norm_q(inputs_q)
+        context, self_attn_data = self.self_attn(input_norm_kv, input_norm_kv, input_norm_q,
                                     mask=mask, attn_type="self")
         if self.save_self_attn:
             self.self_attn_data = self_attn_data
 
-        out = self.dropout(context) + inputs
+        out = self.dropout(context) + inputs_kv
         return self.feed_forward(out)
 
     def update_dropout(self, dropout, attention_dropout):
@@ -128,11 +130,12 @@ class TransformerEncoder(EncoderBase):
 
         emb = self.embeddings(src)
 
-        out = emb.transpose(0, 1).contiguous()
+        emb_v = emb.transpose(0, 1).contiguous()
+        out = emb_v
         mask = ~sequence_mask(lengths).unsqueeze(1)
         # Run the forward pass of every layer of the tranformer.
         for layer in self.transformer:
-            out = layer(out, mask)
+            out = layer(out, emb_v, mask)
         out = self.layer_norm(out)
 
         return emb, out.transpose(0, 1).contiguous(), lengths
