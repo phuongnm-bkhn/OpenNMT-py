@@ -2,10 +2,25 @@
 import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from onmt.utils.misc import generate_relative_positions_matrix,\
                             relative_matmul
 # from onmt.utils.misc import aeq
+
+
+class NgramCombined(nn.Module):
+    def __init__(self, n_gram):
+        super(NgramCombined, self).__init__()
+        self.n_gram = n_gram
+
+    def forward(self, x):
+        out = x
+        if self.n_gram > 1:
+            for i_gram in range(1, self.n_gram):
+                out = F.pad(x.transpose(-1, -2), [i_gram, 0],
+                            mode='constant', value=0).transpose(-1, -2)[:,:-i_gram,:] + x
+        return out
 
 
 class MultiHeadedAttention(nn.Module):
@@ -69,6 +84,9 @@ class MultiHeadedAttention(nn.Module):
 
         self.max_relative_positions = max_relative_positions
 
+        self.n_gram4_features = NgramCombined(4)
+        self.n_gram3_features = NgramCombined(3)
+        self.n_gram2_features = NgramCombined(2)
         if max_relative_positions > 0:
             vocab_size = max_relative_positions * 2 + 1
             self.relative_positions_embeddings = nn.Embedding(
@@ -179,6 +197,23 @@ class MultiHeadedAttention(nn.Module):
                 relative_positions_matrix.to(key.device))
 
         query = shape(query)
+
+        # ngram feature for q, k, v
+        if head_count > 1:
+            query[:, 0, :, :]=self.n_gram2_features(query[:, 0, :, :])
+            key[:, 0, :, :]=self.n_gram2_features(key[:, 0, :, :])
+            value[:, 0, :, :]=self.n_gram2_features(value[:, 0, :, :])
+
+        if head_count > 2:
+            query[:, 1, :, :]=self.n_gram3_features(query[:, 1, :, :])
+            key[:, 1, :, :]=self.n_gram3_features(key[:, 1, :, :])
+            value[:, 1, :, :]=self.n_gram3_features(value[:, 1, :, :])
+
+        if head_count > 3:
+            query[:, 2, :, :]=self.n_gram4_features(query[:, 2, :, :])
+            key[:, 2, :, :]=self.n_gram4_features(key[:, 2, :, :])
+            value[:, 2, :, :]=self.n_gram4_features(value[:, 2, :, :])
+
 
         key_len = key.size(2)
         query_len = query.size(2)
