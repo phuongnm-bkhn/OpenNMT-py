@@ -124,7 +124,7 @@ class MultiHeadedAttention(nn.Module):
     """
 
     def __init__(self, head_count, model_dim, dropout=0.1,
-                 max_relative_positions=0):
+                 max_relative_positions=0, use_ngram_features=False):
         assert model_dim % head_count == 0
         self.dim_per_head = model_dim // head_count
         self.model_dim = model_dim
@@ -144,9 +144,12 @@ class MultiHeadedAttention(nn.Module):
 
         self.max_relative_positions = max_relative_positions
 
-        self.n_gram4_features = NgramLSTM(4, self.dim_per_head) # NgramCombined(4)
-        self.n_gram3_features = NgramLSTM(3, self.dim_per_head) # NgramCombined(3)
-        self.n_gram2_features = NgramLSTM(2, self.dim_per_head) # NgramCombined(2)
+        self.use_ngram_features = use_ngram_features
+        if self.use_ngram_features:
+            self.n_gram4_features = NgramLSTM(4, self.dim_per_head) # NgramCombined(4)
+            self.n_gram3_features = NgramLSTM(3, self.dim_per_head) # NgramCombined(3)
+            self.n_gram2_features = NgramLSTM(2, self.dim_per_head) # NgramCombined(2)
+
         if max_relative_positions > 0:
             vocab_size = max_relative_positions * 2 + 1
             self.relative_positions_embeddings = nn.Embedding(
@@ -259,21 +262,21 @@ class MultiHeadedAttention(nn.Module):
         query = shape(query)
 
         # ngram feature for q, k, v
-        if head_count > 1:
-            query[:, 0, :, :]=self.n_gram2_features(query[:, 0, :, :])
-            key[:, 0, :, :]=self.n_gram2_features(key[:, 0, :, :])
-            value[:, 0, :, :]=self.n_gram2_features(value[:, 0, :, :])
+        if self.use_ngram_features:
+            if head_count > 1:
+                query[:, 0, :, :]=self.n_gram2_features(query[:, 0, :, :])
+                key[:, 0, :, :]=self.n_gram2_features(key[:, 0, :, :])
+                value[:, 0, :, :]=self.n_gram2_features(value[:, 0, :, :])
 
-        if head_count > 2:
-            query[:, 1, :, :]=self.n_gram3_features(query[:, 1, :, :])
-            key[:, 1, :, :]=self.n_gram3_features(key[:, 1, :, :])
-            value[:, 1, :, :]=self.n_gram3_features(value[:, 1, :, :])
+            if head_count > 2:
+                query[:, 1, :, :]=self.n_gram3_features(query[:, 1, :, :])
+                key[:, 1, :, :]=self.n_gram3_features(key[:, 1, :, :])
+                value[:, 1, :, :]=self.n_gram3_features(value[:, 1, :, :])
 
-        if head_count > 3:
-            query[:, 2, :, :]=self.n_gram4_features(query[:, 2, :, :])
-            key[:, 2, :, :]=self.n_gram4_features(key[:, 2, :, :])
-            value[:, 2, :, :]=self.n_gram4_features(value[:, 2, :, :])
-
+            if head_count > 3:
+                query[:, 2, :, :]=self.n_gram4_features(query[:, 2, :, :])
+                key[:, 2, :, :]=self.n_gram4_features(key[:, 2, :, :])
+                value[:, 2, :, :]=self.n_gram4_features(value[:, 2, :, :])
 
         key_len = key.size(2)
         query_len = query.size(2)
