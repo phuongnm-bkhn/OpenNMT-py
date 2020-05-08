@@ -265,37 +265,37 @@ class MultiHeadedAttention(nn.Module):
         # ngram feature for q, k, v
         if self.use_ngram_features:
             if head_count > 3:
-                _xx = torch.cat([ query[:, 0:4, :, :].reshape(-1, query_len, dim_per_head),
-                        key[:, 0:4, :, :].reshape(-1, query_len, dim_per_head),
-                        value[:, 0:4, :, :].reshape(-1, query_len, dim_per_head)
+                _xx = torch.cat([ query[:, 2:4, :, :].reshape(-1, query_len, dim_per_head),
+                        key[:, 2:4, :, :].reshape(-1, query_len, dim_per_head),
+                        value[:, 2:4, :, :].reshape(-1, query_len, dim_per_head)
                        ], dim=0).reshape(-1, query_len, dim_per_head)
                 _yy = self.n_gram2_features(_xx).reshape(3, -1, query_len, dim_per_head)
                 _q, _k, _v = _yy[0], _yy[1], _yy[2]
-                query[:, 0:4, :, :] = _q.reshape(batch_size, 4, query_len, dim_per_head)
-                key[:, 0:4, :, :] = _k.reshape(batch_size, 4, query_len, dim_per_head)
-                value[:, 0:4, :, :] = _v.reshape(batch_size, 4, query_len, dim_per_head)
+                query[:, 2:4, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
+                key[:, 2:4, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
+                value[:, 2:4, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
 
             if head_count > 5:
-                _xx = torch.cat([ query[:, 4:6, :, :].reshape(batch_size*2, query_len, dim_per_head),
-                                  key[:, 4:6, :, :].reshape(batch_size*2, query_len, dim_per_head),
-                                  value[:, 4:6, :, :].reshape(batch_size*2, query_len, dim_per_head)
+                _xx = torch.cat([ query[:, 4:6, :, :].reshape(-1, query_len, dim_per_head),
+                                  key[:, 4:6, :, :].reshape(-1, query_len, dim_per_head),
+                                  value[:, 4:6, :, :].reshape(-1, query_len, dim_per_head)
                                   ], dim=0).reshape(-1, query_len, dim_per_head)
                 _yy = self.n_gram3_features(_xx).reshape(3, -1, query_len, dim_per_head)
                 _q, _k, _v = _yy[0], _yy[1], _yy[2]
-                query[:, 4:6, :, :] = _q.reshape(batch_size, 2, query_len, dim_per_head)
-                key[:, 4:6, :, :] = _k.reshape(batch_size, 2, query_len, dim_per_head)
-                value[:, 4:6, :, :] = _v.reshape(batch_size, 2, query_len, dim_per_head)
+                query[:, 4:6, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
+                key[:, 4:6, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
+                value[:, 4:6, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
 
             if head_count > 7:
-                _xx = torch.cat([ query[:, 6:8, :, :].reshape(batch_size*2, query_len, dim_per_head),
-                                  key[:, 6:8, :, :].reshape(batch_size*2, query_len, dim_per_head),
-                                  value[:, 6:8, :, :].reshape(batch_size*2, query_len, dim_per_head)
+                _xx = torch.cat([ query[:, 6:8, :, :].reshape(-1, query_len, dim_per_head),
+                                  key[:, 6:8, :, :].reshape(-1, query_len, dim_per_head),
+                                  value[:, 6:8, :, :].reshape(-1, query_len, dim_per_head)
                                   ], dim=0).reshape(-1, query_len, dim_per_head)
                 _yy = self.n_gram4_features(_xx).reshape(3, -1, query_len, dim_per_head)
                 _q, _k, _v = _yy[0], _yy[1], _yy[2]
-                query[:, 6:8, :, :] = _q.reshape(batch_size, 2, query_len, dim_per_head)
-                key[:, 6:8, :, :] = _k.reshape(batch_size, 2, query_len, dim_per_head)
-                value[:, 6:8, :, :] = _v.reshape(batch_size, 2, query_len, dim_per_head)
+                query[:, 6:8, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
+                key[:, 6:8, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
+                value[:, 6:8, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
 
         key_len = key.size(2)
         query_len = query.size(2)
