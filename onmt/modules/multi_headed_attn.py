@@ -75,7 +75,8 @@ class NgramLSTM(nn.Module):
         # in this case, we use num_layers = 1, num_directions=2,
         # we sum all directions
         _bank_mt, (_h_n, c_n) = self.rnn(zz)
-        out = torch.sum(c_n, dim=0)
+        _aggregate_hidden_n = torch.cat((_h_n, c_n), dim=0)
+        out = torch.sum(_aggregate_hidden_n, dim=0)
 
         # finally, we reshape original batch_size to return
         # (batch x seq x hidden_size)
