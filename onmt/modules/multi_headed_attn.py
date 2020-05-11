@@ -264,6 +264,12 @@ class MultiHeadedAttention(nn.Module):
 
         # ngram feature for q, k, v
         if self.use_ngram_features:
+            if mask is not None:
+                mask_qkv = mask.unsqueeze(-1)  # [B, 1, seq_len, 1]
+                query = query.masked_fill(mask_qkv, 0)
+                key = key.masked_fill(mask_qkv, 0)
+                value = value.masked_fill(mask_qkv, 0)
+
             if head_count > 3:
                 _xx = torch.cat([ query[:, 2:4, :, :].reshape(-1, query_len, dim_per_head),
                         key[:, 2:4, :, :].reshape(-1, query_len, dim_per_head),
