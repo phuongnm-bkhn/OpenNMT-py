@@ -36,7 +36,7 @@ class NgramLSTM(nn.Module):
                            self.hidden_size,
                            batch_first=True,
                            num_layers=self._num_layers,
-                           bidirectional=True)
+                           bidirectional=False)
 
     def forward(self, _x):
         # we need to create a new data input to learn the n-gram (k) feature using LSTM
