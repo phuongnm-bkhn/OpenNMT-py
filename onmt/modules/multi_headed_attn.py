@@ -277,9 +277,9 @@ class MultiHeadedAttention(nn.Module):
                        ], dim=0).reshape(-1, query_len, dim_per_head)
                 _yy = self.n_gram2_features(_xx).reshape(3, -1, query_len, dim_per_head)
                 _q, _k, _v = _yy[0], _yy[1], _yy[2]
-                query[:, 2:4, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
-                key[:, 2:4, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
-                value[:, 2:4, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
+                query[:, 2:4, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head) + query[:, 2:4, :, :]
+                key[:, 2:4, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head) + key[:, 2:4, :, :]
+                value[:, 2:4, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head) + value[:, 2:4, :, :]
 
             if head_count > 5:
                 _xx = torch.cat([ query[:, 4:6, :, :].reshape(-1, query_len, dim_per_head),
@@ -288,9 +288,9 @@ class MultiHeadedAttention(nn.Module):
                                   ], dim=0).reshape(-1, query_len, dim_per_head)
                 _yy = self.n_gram3_features(_xx).reshape(3, -1, query_len, dim_per_head)
                 _q, _k, _v = _yy[0], _yy[1], _yy[2]
-                query[:, 4:6, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
-                key[:, 4:6, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
-                value[:, 4:6, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
+                query[:, 4:6, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head) + query[:, 4:6, :, :]
+                key[:, 4:6, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head) + key[:, 4:6, :, :]
+                value[:, 4:6, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head) + value[:, 4:6, :, :]
 
             if head_count > 7:
                 _xx = torch.cat([ query[:, 6:8, :, :].reshape(-1, query_len, dim_per_head),
@@ -299,9 +299,9 @@ class MultiHeadedAttention(nn.Module):
                                   ], dim=0).reshape(-1, query_len, dim_per_head)
                 _yy = self.n_gram4_features(_xx).reshape(3, -1, query_len, dim_per_head)
                 _q, _k, _v = _yy[0], _yy[1], _yy[2]
-                query[:, 6:8, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
-                key[:, 6:8, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
-                value[:, 6:8, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
+                query[:, 6:8, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head) + query[:, 6:8, :, :]
+                key[:, 6:8, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head) + key[:, 6:8, :, :]
+                value[:, 6:8, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head) + value[:, 6:8, :, :]
 
         key_len = key.size(2)
         query_len = query.size(2)
