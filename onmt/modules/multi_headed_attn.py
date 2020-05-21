@@ -148,8 +148,11 @@ class MultiHeadedAttention(nn.Module):
         self.use_ngram_features = use_ngram_features
         if self.use_ngram_features:
             self.n_gram4_features = NgramLSTM(4, self.dim_per_head) # NgramCombined(4)
+            self.n_gram4_features1 = NgramLSTM(4, self.dim_per_head) # NgramCombined(4)
             self.n_gram3_features = NgramLSTM(3, self.dim_per_head) # NgramCombined(3)
+            self.n_gram3_features1 = NgramLSTM(3, self.dim_per_head) # NgramCombined(3)
             self.n_gram2_features = NgramLSTM(2, self.dim_per_head) # NgramCombined(2)
+            self.n_gram2_features1 = NgramLSTM(2, self.dim_per_head) # NgramCombined(2)
 
         if max_relative_positions > 0:
             vocab_size = max_relative_positions * 2 + 1
@@ -271,37 +274,67 @@ class MultiHeadedAttention(nn.Module):
                 value = value.masked_fill(mask_qkv, 0)
 
             if head_count > 3:
-                _xx = torch.cat([ query[:, 2:4, :, :].reshape(-1, query_len, dim_per_head),
-                        key[:, 2:4, :, :].reshape(-1, query_len, dim_per_head),
-                        value[:, 2:4, :, :].reshape(-1, query_len, dim_per_head)
+                _xx = torch.cat([ query[:, 2:3, :, :].reshape(-1, query_len, dim_per_head),
+                        key[:, 2:3, :, :].reshape(-1, query_len, dim_per_head),
+                        value[:, 2:3, :, :].reshape(-1, query_len, dim_per_head)
                        ], dim=0).reshape(-1, query_len, dim_per_head)
                 _yy = self.n_gram2_features(_xx).reshape(3, -1, query_len, dim_per_head)
                 _q, _k, _v = _yy[0], _yy[1], _yy[2]
-                query[:, 2:4, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
-                key[:, 2:4, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
-                value[:, 2:4, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
+                query[:, 2:3, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
+                key[:, 2:3, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
+                value[:, 2:3, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
+
+                _xx = torch.cat([ query[:, 3:4, :, :].reshape(-1, query_len, dim_per_head),
+                                  key[:, 3:4, :, :].reshape(-1, query_len, dim_per_head),
+                                  value[:, 3:4, :, :].reshape(-1, query_len, dim_per_head)
+                                  ], dim=0).reshape(-1, query_len, dim_per_head)
+                _yy = self.n_gram2_features1(_xx).reshape(3, -1, query_len, dim_per_head)
+                _q, _k, _v = _yy[0], _yy[1], _yy[2]
+                query[:, 3:4, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
+                key[:, 3:4, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
+                value[:, 3:4, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
 
             if head_count > 5:
-                _xx = torch.cat([ query[:, 4:6, :, :].reshape(-1, query_len, dim_per_head),
-                                  key[:, 4:6, :, :].reshape(-1, query_len, dim_per_head),
-                                  value[:, 4:6, :, :].reshape(-1, query_len, dim_per_head)
+                _xx = torch.cat([ query[:, 4:5, :, :].reshape(-1, query_len, dim_per_head),
+                                  key[:, 4:5, :, :].reshape(-1, query_len, dim_per_head),
+                                  value[:, 4:5, :, :].reshape(-1, query_len, dim_per_head)
                                   ], dim=0).reshape(-1, query_len, dim_per_head)
                 _yy = self.n_gram3_features(_xx).reshape(3, -1, query_len, dim_per_head)
                 _q, _k, _v = _yy[0], _yy[1], _yy[2]
-                query[:, 4:6, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
-                key[:, 4:6, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
-                value[:, 4:6, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
+                query[:, 4:5, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
+                key[:, 4:5, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
+                value[:, 4:5, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
+
+                _xx = torch.cat([ query[:, 5:6, :, :].reshape(-1, query_len, dim_per_head),
+                                  key[:, 5:6, :, :].reshape(-1, query_len, dim_per_head),
+                                  value[:, 5:6, :, :].reshape(-1, query_len, dim_per_head)
+                                  ], dim=0).reshape(-1, query_len, dim_per_head)
+                _yy = self.n_gram3_features1(_xx).reshape(3, -1, query_len, dim_per_head)
+                _q, _k, _v = _yy[0], _yy[1], _yy[2]
+                query[:, 5:6, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
+                key[:, 5:6, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
+                value[:, 5:6, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
 
             if head_count > 7:
-                _xx = torch.cat([ query[:, 6:8, :, :].reshape(-1, query_len, dim_per_head),
-                                  key[:, 6:8, :, :].reshape(-1, query_len, dim_per_head),
-                                  value[:, 6:8, :, :].reshape(-1, query_len, dim_per_head)
+                _xx = torch.cat([ query[:, 6:7, :, :].reshape(-1, query_len, dim_per_head),
+                                  key[:, 6:7, :, :].reshape(-1, query_len, dim_per_head),
+                                  value[:, 6:7, :, :].reshape(-1, query_len, dim_per_head)
                                   ], dim=0).reshape(-1, query_len, dim_per_head)
                 _yy = self.n_gram4_features(_xx).reshape(3, -1, query_len, dim_per_head)
                 _q, _k, _v = _yy[0], _yy[1], _yy[2]
-                query[:, 6:8, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
-                key[:, 6:8, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
-                value[:, 6:8, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
+                query[:, 6:7, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
+                key[:, 6:7, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
+                value[:, 6:7, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
+
+                _xx = torch.cat([ query[:, 7:8, :, :].reshape(-1, query_len, dim_per_head),
+                                  key[:, 7:8, :, :].reshape(-1, query_len, dim_per_head),
+                                  value[:, 7:8, :, :].reshape(-1, query_len, dim_per_head)
+                                  ], dim=0).reshape(-1, query_len, dim_per_head)
+                _yy = self.n_gram4_features1(_xx).reshape(3, -1, query_len, dim_per_head)
+                _q, _k, _v = _yy[0], _yy[1], _yy[2]
+                query[:, 7:8, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
+                key[:, 7:8, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
+                value[:, 7:8, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
 
         key_len = key.size(2)
         query_len = query.size(2)
