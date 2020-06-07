@@ -532,6 +532,9 @@ def train_opts(parser):
                    "Default is every update, "
                    "if -average_decay is set.")
 
+    group.add('--ngram_sizes', '-ngram_sizes', default=[], nargs='*', type=int,
+              help="Deprecated see world_size and gpu_ranks.")
+
     # learning rate
     group = parser.add_argument_group('Optimization- Rate')
     group.add('--learning_rate', '-learning_rate', type=float, default=1.0,

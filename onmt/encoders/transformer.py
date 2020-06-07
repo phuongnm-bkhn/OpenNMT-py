@@ -24,12 +24,13 @@ class TransformerEncoderLayer(nn.Module):
     """
 
     def __init__(self, d_model, heads, d_ff, dropout, attention_dropout,
-                 max_relative_positions=0):
+                 max_relative_positions=0, ngram_sizes=[]):
         super(TransformerEncoderLayer, self).__init__()
 
         self.self_attn = MultiHeadedAttention(
             heads, d_model, dropout=attention_dropout,
-            max_relative_positions=max_relative_positions, use_ngram_features=True)
+            max_relative_positions=max_relative_positions, use_ngram_features=True,
+            ngram_sizes=ngram_sizes)
         self.feed_forward = PositionwiseFeedForward(d_model, d_ff, dropout)
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
         self.dropout = nn.Dropout(dropout)
@@ -97,14 +98,14 @@ class TransformerEncoder(EncoderBase):
     """
 
     def __init__(self, num_layers, d_model, heads, d_ff, dropout,
-                 attention_dropout, embeddings, max_relative_positions):
+                 attention_dropout, embeddings, max_relative_positions, ngram_sizes):
         super(TransformerEncoder, self).__init__()
 
         self.embeddings = embeddings
         self.transformer = nn.ModuleList(
             [TransformerEncoderLayer(
                 d_model, heads, d_ff, dropout, attention_dropout,
-                max_relative_positions=max_relative_positions)
+                max_relative_positions=max_relative_positions, ngram_sizes=ngram_sizes)
              for i in range(num_layers)])
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
 
@@ -120,7 +121,7 @@ class TransformerEncoder(EncoderBase):
             opt.attention_dropout[0] if type(opt.attention_dropout)
             is list else opt.attention_dropout,
             embeddings,
-            opt.max_relative_positions)
+            opt.max_relative_positions, opt.ngram_sizes)
 
     def forward(self, src, lengths=None):
         """See :func:`EncoderBase.forward()`"""

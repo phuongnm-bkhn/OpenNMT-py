@@ -125,7 +125,7 @@ class MultiHeadedAttention(nn.Module):
     """
 
     def __init__(self, head_count, model_dim, dropout=0.1,
-                 max_relative_positions=0, use_ngram_features=False):
+                 max_relative_positions=0, use_ngram_features=False, ngram_sizes=None):
         assert model_dim % head_count == 0
         self.dim_per_head = model_dim // head_count
         self.model_dim = model_dim
@@ -146,10 +146,15 @@ class MultiHeadedAttention(nn.Module):
         self.max_relative_positions = max_relative_positions
 
         self.use_ngram_features = use_ngram_features
-        if self.use_ngram_features:
-            self.n_gram4_features = NgramLSTM(4, self.dim_per_head) # NgramCombined(4)
-            self.n_gram3_features = NgramLSTM(3, self.dim_per_head) # NgramCombined(3)
-            self.n_gram2_features = NgramLSTM(2, self.dim_per_head) # NgramCombined(2)
+        # if self.use_ngram_features:
+        #     self.n_gram4_features = NgramLSTM(4, self.dim_per_head) # NgramCombined(4)
+        #     self.n_gram3_features = NgramLSTM(3, self.dim_per_head) # NgramCombined(3)
+        #     self.n_gram2_features = NgramLSTM(2, self.dim_per_head) # NgramCombined(2)
+        self.ngram_sizes = ngram_sizes or []
+        if self.ngram_sizes is not None:
+            self.ngram_features = [NgramLSTM(ngram_size, self.dim_per_head) if ngram_size > 1 else None
+                                   for ngram_size in self.ngram_sizes]
+        self.features_impacted_rate = nn.Softmax(dim=0)
 
         if max_relative_positions > 0:
             vocab_size = max_relative_positions * 2 + 1
@@ -264,38 +269,29 @@ class MultiHeadedAttention(nn.Module):
 
         # ngram feature for q, k, v
         if self.use_ngram_features:
-            if head_count > 3:
-                _xx = torch.cat([ query[:, 2:4, :, :].reshape(-1, query_len, dim_per_head),
-                        key[:, 2:4, :, :].reshape(-1, query_len, dim_per_head),
-                        value[:, 2:4, :, :].reshape(-1, query_len, dim_per_head)
+            _all_ngram_features = []
+            for ngram_feature_extractor in self.ngram_features:
+                _xx = torch.cat([query[:, :, :, :].reshape(-1, query_len, dim_per_head),
+                        key[:, :, :, :].reshape(-1, query_len, dim_per_head),
+                        value[:, :, :, :].reshape(-1, query_len, dim_per_head)
                        ], dim=0).reshape(-1, query_len, dim_per_head)
-                _yy = self.n_gram2_features(_xx).reshape(3, -1, query_len, dim_per_head)
-                _q, _k, _v = _yy[0], _yy[1], _yy[2]
-                query[:, 2:4, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
-                key[:, 2:4, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
-                value[:, 2:4, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
+                if ngram_feature_extractor is not None:
+                    _yy = ngram_feature_extractor(_xx)
+                else:
+                    _yy = _xx
+                _all_ngram_features.append(_yy)
+            _all_ngram_features = torch.stack(_all_ngram_features)
 
-            if head_count > 5:
-                _xx = torch.cat([ query[:, 4:6, :, :].reshape(-1, query_len, dim_per_head),
-                                  key[:, 4:6, :, :].reshape(-1, query_len, dim_per_head),
-                                  value[:, 4:6, :, :].reshape(-1, query_len, dim_per_head)
-                                  ], dim=0).reshape(-1, query_len, dim_per_head)
-                _yy = self.n_gram3_features(_xx).reshape(3, -1, query_len, dim_per_head)
-                _q, _k, _v = _yy[0], _yy[1], _yy[2]
-                query[:, 4:6, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
-                key[:, 4:6, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
-                value[:, 4:6, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
+            impacted_rate = self.features_impacted_rate(_all_ngram_features)
+            _all_ngram_features = torch.sum(impacted_rate*_all_ngram_features, dim=0)
 
-            if head_count > 7:
-                _xx = torch.cat([ query[:, 6:8, :, :].reshape(-1, query_len, dim_per_head),
-                                  key[:, 6:8, :, :].reshape(-1, query_len, dim_per_head),
-                                  value[:, 6:8, :, :].reshape(-1, query_len, dim_per_head)
-                                  ], dim=0).reshape(-1, query_len, dim_per_head)
-                _yy = self.n_gram4_features(_xx).reshape(3, -1, query_len, dim_per_head)
-                _q, _k, _v = _yy[0], _yy[1], _yy[2]
-                query[:, 6:8, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
-                key[:, 6:8, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
-                value[:, 6:8, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
+            _yy = _all_ngram_features.reshape(3, -1, query_len, dim_per_head)
+            _q, _k, _v = _yy[0], _yy[1], _yy[2]
+            query[:, :, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
+            key[:, :, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
+            value[:, :, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
+
+            self.query_features = query
 
         key_len = key.size(2)
         query_len = query.size(2)
