@@ -23,6 +23,20 @@ class NgramCombined(nn.Module):
         return out
 
 
+class NgramIdentity(nn.Module):
+    def __init__(self):
+        super(NgramIdentity, self).__init__()
+
+    def forward(self, _inp):
+        previous_out, _x = _inp[0], _inp[1]
+
+        data_input_org = _x
+        out = _x.unsqueeze(dim=0)
+        if previous_out is not None:
+            out = torch.cat([previous_out, out], dim=0)
+        return (out, data_input_org)
+
+
 class NgramLSTM(nn.Module):
     def __init__(self, n_gram, input_size):
         super(NgramLSTM, self).__init__()
@@ -38,7 +52,9 @@ class NgramLSTM(nn.Module):
                            num_layers=self._num_layers,
                            bidirectional=True)
 
-    def forward(self, _x):
+    def forward(self,  _inp):
+        previous_out, _x = _inp[0], _inp[1]
+        data_input_org = _x
         # we need to create a new data input to learn the n-gram (k) feature using LSTM
         # with origin input (_x) = [emb_1, emb_2, emb_3 .. emb_{seq_length}]: batchsize x seq_length x emb_size
         n_gram = self.n_gram
@@ -81,7 +97,11 @@ class NgramLSTM(nn.Module):
         # finally, we reshape original batch_size to return
         # (batch x seq x hidden_size)
         out = out.reshape(batch_size, -1, hidden_size)
-        return out
+
+        out = out.unsqueeze(dim=0)
+        if previous_out is not None:
+            out = torch.cat([previous_out, out], dim=0)
+        return (out, data_input_org)
 
 
 class MultiHeadedAttention(nn.Module):
@@ -151,9 +171,13 @@ class MultiHeadedAttention(nn.Module):
         #     self.n_gram3_features = NgramLSTM(3, self.dim_per_head) # NgramCombined(3)
         #     self.n_gram2_features = NgramLSTM(2, self.dim_per_head) # NgramCombined(2)
         self.ngram_sizes = ngram_sizes or []
+        self.ngram_features = nn.Sequential()
         if self.ngram_sizes is not None:
-            self.ngram_features = [NgramLSTM(ngram_size, self.dim_per_head) if ngram_size > 1 else None
-                                   for ngram_size in self.ngram_sizes]
+            for idx, ngram_size in enumerate(self.ngram_sizes):
+                md = NgramLSTM(ngram_size, self.dim_per_head) if ngram_size > 1 else NgramIdentity()
+                name = "NgramLSTM{}({})".format(idx, ngram_size) \
+                    if ngram_size > 1 else "NgramIdentity{}()".format(idx)
+                self.ngram_features.add_module(name, md)
         self.features_impacted_rate = nn.Softmax(dim=0)
 
         if max_relative_positions > 0:
@@ -270,17 +294,22 @@ class MultiHeadedAttention(nn.Module):
         # ngram feature for q, k, v
         if self.use_ngram_features:
             _all_ngram_features = []
-            for ngram_feature_extractor in self.ngram_features:
-                _xx = torch.cat([query[:, :, :, :].reshape(-1, query_len, dim_per_head),
-                        key[:, :, :, :].reshape(-1, query_len, dim_per_head),
-                        value[:, :, :, :].reshape(-1, query_len, dim_per_head)
-                       ], dim=0).reshape(-1, query_len, dim_per_head)
-                if ngram_feature_extractor is not None:
-                    _yy = ngram_feature_extractor(_xx)
-                else:
-                    _yy = _xx
-                _all_ngram_features.append(_yy)
-            _all_ngram_features = torch.stack(_all_ngram_features)
+            # for ngram_feature_extractor in self.ngram_features:
+            #     _xx = torch.cat([query[:, :, :, :].reshape(-1, query_len, dim_per_head),
+            #             key[:, :, :, :].reshape(-1, query_len, dim_per_head),
+            #             value[:, :, :, :].reshape(-1, query_len, dim_per_head)
+            #            ], dim=0).reshape(-1, query_len, dim_per_head)
+            #     if ngram_feature_extractor is not None:
+            #         _yy = ngram_feature_extractor(_xx)
+            #     else:
+            #         _yy = _xx
+            #     _all_ngram_features.append(_yy)
+
+            _xx = torch.cat([query[:, :, :, :].reshape(-1, query_len, dim_per_head),
+                             key[:, :, :, :].reshape(-1, query_len, dim_per_head),
+                             value[:, :, :, :].reshape(-1, query_len, dim_per_head)
+                             ], dim=0).reshape(-1, query_len, dim_per_head)
+            _all_ngram_features, _ = self.ngram_features((None, _xx)) #torch.stack(_all_ngram_features)
 
             impacted_rate = self.features_impacted_rate(_all_ngram_features)
             _all_ngram_features = torch.sum(impacted_rate*_all_ngram_features, dim=0)
