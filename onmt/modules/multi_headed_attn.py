@@ -171,14 +171,14 @@ class MultiHeadedAttention(nn.Module):
         #     self.n_gram3_features = NgramLSTM(3, self.dim_per_head) # NgramCombined(3)
         #     self.n_gram2_features = NgramLSTM(2, self.dim_per_head) # NgramCombined(2)
         self.ngram_sizes = ngram_sizes or []
-        self.ngram_features = nn.Sequential()
-        if self.ngram_sizes is not None:
+        if self.use_ngram_features and self.ngram_sizes is not None:
+            self.ngram_features = nn.Sequential()
             for idx, ngram_size in enumerate(self.ngram_sizes):
                 md = NgramLSTM(ngram_size, self.dim_per_head) if ngram_size > 1 else NgramIdentity()
                 name = "NgramLSTM{}({})".format(idx, ngram_size) \
                     if ngram_size > 1 else "NgramIdentity{}()".format(idx)
                 self.ngram_features.add_module(name, md)
-        self.features_impacted_rate = nn.Softmax(dim=0)
+            self.features_impacted_rate = nn.Softmax(dim=0) # nn.Sigmoid()
 
         if max_relative_positions > 0:
             vocab_size = max_relative_positions * 2 + 1
