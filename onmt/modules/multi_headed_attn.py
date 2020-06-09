@@ -178,7 +178,7 @@ class MultiHeadedAttention(nn.Module):
                 name = "NgramLSTM{}({})".format(idx, ngram_size) \
                     if ngram_size > 1 else "NgramIdentity{}()".format(idx)
                 self.ngram_features.add_module(name, md)
-            self.features_impacted_rate = nn.Softmax(dim=0) # nn.Sigmoid()
+            self.features_impacted_rate = nn.Sigmoid()
 
         if max_relative_positions > 0:
             vocab_size = max_relative_positions * 2 + 1
