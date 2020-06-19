@@ -58,6 +58,15 @@ def make_tgt(data, vocab):
     return alignment
 
 
+def pad_tf_idf(data, vocab):
+    tgt_size = max([t[0].shape[0] for t in data])
+    alignment = torch.zeros(tgt_size, len(data)).float()
+    for i, sent_tf_idf_vect in enumerate(data):
+        for j in range(sent_tf_idf_vect[0].shape[0]):
+            alignment[j, i] = sent_tf_idf_vect[0][j]
+    return alignment
+
+
 class AlignField(LabelField):
     """
     Parse ['<src>-<tgt>', ...] into ['<src>','<tgt>', ...]
@@ -169,6 +178,9 @@ def get_fields(
                         "base_name": "src_label"}
     if marking_mechanism:
         fields["src_label"] = fields_getters["text"](**tgt_field_kwargs)
+    use_tf_idf = True
+    if use_tf_idf:
+        fields["tf_idf_feats"] = Field(use_vocab=False, dtype=torch.float, sequential=False, postprocessing=pad_tf_idf)
 
     indices = Field(use_vocab=False, dtype=torch.long, sequential=False)
     fields["indices"] = indices

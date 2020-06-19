@@ -319,7 +319,8 @@ class Trainer(object):
                 tgt = batch.tgt
 
                 # F-prop through the model.
-                outputs, attns, enc_hiddens = valid_model(src, tgt, src_lengths, with_align=self.with_align)
+                outputs, attns, enc_hiddens = valid_model(src, tgt, src_lengths, with_align=self.with_align,
+                                                          tf_idf_features=batch.tf_idf_feats)
 
                 # Compute loss.
                 _, batch_stats = self.valid_loss(batch, outputs, attns, enc_hiddens=enc_hiddens)
@@ -337,7 +338,7 @@ class Trainer(object):
         return stats
 
     def _gradient_accumulation(self, true_batches, normalization, total_stats,
-                               report_stats):
+                               report_stats, tfidf_features=None):
         if self.accum_count > 1:
             self.optim.zero_grad()
 
@@ -366,7 +367,8 @@ class Trainer(object):
                     self.optim.zero_grad()
 
                 outputs, attns, enc_hiddens = self.model(src, tgt, src_lengths, bptt=bptt,
-                                                         with_align=self.with_align)
+                                                         with_align=self.with_align,
+                                                         tf_idf_features=batch.tf_idf_feats)
                 bptt = True
 
                 # 3. Compute loss.

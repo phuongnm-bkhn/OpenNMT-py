@@ -261,6 +261,10 @@ def preprocess_opts(parser):
     group.add('--overwrite', '-overwrite', action="store_true",
               help="Overwrite existing shards if any.")
 
+    group.add('--train_tf_idf', '-train_tf_idf', required=False, default=None, help="Use tf-idf vectorizer.")
+    group.add('--valid_tf_idf', '-valid_tf_idf', required=False, default=None, help="Use tf-idf vectorizer.")
+
+
     # Dictionary options, for text corpus
 
     group = parser.add_argument_group('Vocab')

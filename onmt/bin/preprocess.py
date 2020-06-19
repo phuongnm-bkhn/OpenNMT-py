@@ -6,6 +6,8 @@
 import codecs
 import glob
 import gc
+from itertools import islice
+
 import torch
 from collections import Counter, defaultdict
 
@@ -46,7 +48,7 @@ def check_existing_pt_files(opt, corpus_type, ids, existing_fields):
 def process_one_shard(corpus_params, params):
     corpus_type, fields, src_reader, tgt_reader, align_reader, opt,\
          existing_fields, src_vocab, tgt_vocab = corpus_params
-    i, (src_shard, tgt_shard, align_shard, maybe_id, filter_pred) = params
+    i, (src_shard, tgt_shard, align_shard, maybe_id, filter_pred, tf_idf_shard) = params
     # create one counter per shard
     sub_sub_counter = defaultdict(Counter)
     assert len(src_shard) == len(tgt_shard)
@@ -57,6 +59,10 @@ def process_one_shard(corpus_params, params):
     align_data = {"reader": align_reader, "data": align_shard, "dir": None}
     _readers, _data, _dir = inputters.Dataset.config(
         [('src', src_data), ('tgt', tgt_data), ('align', align_data)])
+
+    # phuongnm
+    if tf_idf_shard is not None:
+        _data.append(tf_idf_shard)
 
     dataset = inputters.Dataset(
         fields, readers=_readers, data=_data, dirs=_dir,
@@ -155,6 +161,26 @@ def build_save_dataset(corpus_type, fields, src_reader, tgt_reader,
     if existing_shards == ids and not opt.overwrite:
         return
 
+    # phuongnm
+    if corpus_type == "train":
+        tf_idf_features_file = opt.train_tf_idf
+    elif corpus_type == "valid":
+        tf_idf_features_file = opt.valid_tf_idf
+    tf_idf_features = None
+    if tf_idf_features_file is not None:
+        import pickle
+        tf_idf_features = pickle.load(open(tf_idf_features_file, "rb"))
+        tf_idf_features = [torch.from_numpy(mt) for mt in tf_idf_features]
+
+    def _split_data(_data, shard_size):
+        if shard_size <= 0:
+            yield _data
+        else:
+            for i in range(0, len(_data), shard_size):
+                shard = _data[i:i+shard_size]
+                yield shard
+    # #
+
     def shard_iterator(srcs, tgts, ids, aligns, existing_shards,
                        existing_fields, corpus_type, opt):
         """
@@ -187,9 +213,11 @@ def build_save_dataset(corpus_type, fields, src_reader, tgt_reader,
             src_shards = split_corpus(src, opt.shard_size)
             tgt_shards = split_corpus(tgt, opt.shard_size)
             align_shards = split_corpus(maybe_align, opt.shard_size)
-            for i, (ss, ts, a_s) in enumerate(
-                    zip(src_shards, tgt_shards, align_shards)):
-                yield (i, (ss, ts, a_s, maybe_id, filter_pred))
+            tf_idf_shards = _split_data(tf_idf_features, opt.shard_size)
+
+            for i, (ss, ts, a_s, tf_idf) in enumerate(
+                    zip(src_shards, tgt_shards, align_shards, tf_idf_shards)):
+                yield (i, (ss, ts, a_s, maybe_id, filter_pred, tf_idf))
 
     shard_iter = shard_iterator(srcs, tgts, ids, aligns, existing_shards,
                                 existing_fields, corpus_type, opt)

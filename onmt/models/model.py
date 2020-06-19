@@ -18,7 +18,7 @@ class NMTModel(nn.Module):
         self.encoder = encoder
         self.decoder = decoder
 
-    def forward(self, src, tgt, lengths, bptt=False, with_align=False):
+    def forward(self, src, tgt, lengths, bptt=False, with_align=False, tf_idf_features=None):
         """Forward propagate a `src` and `tgt` pair for training.
         Possible initialized with a beginning decoder state.
 
@@ -44,6 +44,8 @@ class NMTModel(nn.Module):
         dec_in = tgt[:-1]  # exclude last target from inputs
 
         enc_state, memory_bank, lengths = self.encoder(src, lengths)
+        if tf_idf_features is not None:
+            memory_bank = memory_bank * tf_idf_features.unsqueeze(-1)
 
         if bptt is False:
             if "CombinedTransformerRnnEncoder" in str(type(self.encoder)):

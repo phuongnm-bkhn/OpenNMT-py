@@ -166,6 +166,11 @@ class Dataset(TorchtextDataset):
             for sample in examples:
                 setattr(sample, 'src_label', [transformed_data[sample.indices][3]])
 
+        # phuongnm
+        if "tf_idf_feats" in org_fields and len(data) == 3:
+            for sample in examples:
+                setattr(sample, 'tf_idf_feats', [data[2][sample.indices]])
+
         super(Dataset, self).__init__(examples, fields, filter_pred)
 
     def __getattr__(self, attr):
