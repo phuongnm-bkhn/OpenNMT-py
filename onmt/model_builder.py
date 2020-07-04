@@ -12,6 +12,7 @@ import onmt.modules
 from onmt.encoders import str2enc
 
 from onmt.decoders import str2dec
+from onmt.encoders.constituent_tree_encoder import ConstituentTreeEncoder
 
 from onmt.modules import Embeddings, VecEmbedding, CopyGenerator
 from onmt.modules.util_class import Cast
@@ -64,7 +65,7 @@ def build_embeddings(opt, text_field, for_encoder=True):
     return emb
 
 
-def build_encoder(opt, embeddings):
+def build_encoder(opt, embeddings, src_constituent_tree_emb=None):
     """
     Various encoder dispatcher function.
     Args:
@@ -73,7 +74,7 @@ def build_encoder(opt, embeddings):
     """
     enc_type = opt.encoder_type if opt.model_type == "text" \
         or opt.model_type == "vec" else opt.model_type
-    return str2enc[enc_type].from_opt(opt, embeddings)
+    return str2enc[enc_type].from_opt(opt, embeddings, src_constituent_tree_emb)
 
 
 def build_decoder(opt, embeddings):
@@ -142,11 +143,14 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
     if model_opt.model_type == "text" or model_opt.model_type == "vec":
         src_field = fields["src"]
         src_emb = build_embeddings(model_opt, src_field)
+        src_constituent_tree_emb = ConstituentTreeEncoder(fields["constituent_tree"].base_field,
+                                                          embedding_dim=model_opt.enc_rnn_size,
+                                                          hidden_size=model_opt.enc_rnn_size)
     else:
         src_emb = None
 
     # Build encoder.
-    encoder = build_encoder(model_opt, src_emb)
+    encoder = build_encoder(model_opt, src_emb, src_constituent_tree_emb)
 
     # Build decoder.
     tgt_field = fields["tgt"]

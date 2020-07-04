@@ -97,10 +97,11 @@ class TransformerEncoder(EncoderBase):
     """
 
     def __init__(self, num_layers, d_model, heads, d_ff, dropout,
-                 attention_dropout, embeddings, max_relative_positions):
+                 attention_dropout, embeddings, src_constituent_tree_emb, max_relative_positions):
         super(TransformerEncoder, self).__init__()
 
         self.embeddings = embeddings
+        self.constituent_tree_emb = src_constituent_tree_emb
         self.transformer = nn.ModuleList(
             [TransformerEncoderLayer(
                 d_model, heads, d_ff, dropout, attention_dropout,
@@ -109,7 +110,7 @@ class TransformerEncoder(EncoderBase):
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
 
     @classmethod
-    def from_opt(cls, opt, embeddings):
+    def from_opt(cls, opt, embeddings, src_constituent_tree_emb=None):
         """Alternate constructor."""
         return cls(
             opt.enc_layers,
@@ -120,13 +121,17 @@ class TransformerEncoder(EncoderBase):
             opt.attention_dropout[0] if type(opt.attention_dropout)
             is list else opt.attention_dropout,
             embeddings,
+            src_constituent_tree_emb,
             opt.max_relative_positions)
 
-    def forward(self, src, lengths=None):
+    def forward(self, src, lengths=None, **kwargs):
         """See :func:`EncoderBase.forward()`"""
         self._check_args(src, lengths)
+        constituent_tree = kwargs.get("constituent_tree")
+        constituent_tree_feat = self.constituent_tree_emb(constituent_tree.squeeze(dim=2))
 
         emb = self.embeddings(src)
+        emb = emb + constituent_tree_feat.reshape(emb.shape)
 
         out = emb.transpose(0, 1).contiguous()
         mask = ~sequence_mask(lengths).unsqueeze(1)

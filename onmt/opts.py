@@ -261,6 +261,12 @@ def preprocess_opts(parser):
     group.add('--overwrite', '-overwrite', action="store_true",
               help="Overwrite existing shards if any.")
 
+    group.add('--train_constituent_tree', '-train_constituent_tree', required=False,  nargs='+', default=[None],
+              help="Path of train constituent tree.")
+    group.add('--valid_constituent_tree', '-valid_constituent_tree', required=False, default=None,
+              help="Path of valid constituent tree.")
+
+
     # Dictionary options, for text corpus
 
     group = parser.add_argument_group('Vocab')

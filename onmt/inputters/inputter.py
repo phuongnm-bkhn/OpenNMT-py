@@ -14,6 +14,7 @@ from torchtext.vocab import Vocab
 from torchtext.data.utils import RandomShuffler
 
 from onmt.inputters.text_dataset import text_fields, TextMultiField
+from onmt.inputters.structure_text_dataset import structure_text_fields
 from onmt.inputters.image_dataset import image_fields
 from onmt.inputters.audio_dataset import audio_fields
 from onmt.inputters.vec_dataset import vec_fields
@@ -109,7 +110,8 @@ def get_fields(
     with_align=False,
     src_truncate=None,
     tgt_truncate=None,
-    marking_mechanism=False
+    marking_mechanism=False,
+    use_constituent_tree=False
 ):
     """
     Args:
@@ -144,6 +146,7 @@ def get_fields(
     fields = {}
 
     fields_getters = {"text": text_fields,
+                      "structure_text": structure_text_fields,
                       "img": image_fields,
                       "audio": audio_fields,
                       "vec": vec_fields}
@@ -162,13 +165,22 @@ def get_fields(
                         "base_name": "tgt"}
     fields["tgt"] = fields_getters["text"](**tgt_field_kwargs)
 
-    tgt_field_kwargs = {"n_feats": 0,
-                        "include_lengths": False,
-                        "pad": pad, "bos": None, "eos": None,
-                        "truncate": tgt_truncate,
-                        "base_name": "src_label"}
     if marking_mechanism:
-        fields["src_label"] = fields_getters["text"](**tgt_field_kwargs)
+        src_label_field_kwargs = {"n_feats": 0,
+                                  "include_lengths": False,
+                                  "pad": pad, "bos": None, "eos": None,
+                                  "truncate": tgt_truncate,
+                                  "base_name": "src_label"}
+        fields["src_label"] = fields_getters["text"](**src_label_field_kwargs)
+
+    if use_constituent_tree:
+        constituent_tree_field_kwargs = {"n_feats": 0,
+                                         "include_lengths": False,
+                                         "pad": pad, "bos": bos, "eos": eos,
+                                         "lower": True,
+                                         "truncate": None,
+                                         "base_name": "constituent_tree"}
+        fields["constituent_tree"] = fields_getters["structure_text"](**constituent_tree_field_kwargs)
 
     indices = Field(use_vocab=False, dtype=torch.long, sequential=False)
     fields["indices"] = indices
@@ -376,6 +388,9 @@ def _build_fields_vocab(fields, counters, data_type, share_vocab,
     build_fv_args = defaultdict(dict)
     build_fv_args["src"] = dict(
         max_size=src_vocab_size, min_freq=src_words_min_frequency)
+    if "constituent_tree" in fields:
+        build_fv_args["constituent_tree"] = dict(
+            max_size=100000, min_freq=0)
     build_fv_args["tgt"] = dict(
         max_size=tgt_vocab_size, min_freq=tgt_words_min_frequency)
     tgt_multifield = fields["tgt"]
@@ -391,6 +406,13 @@ def _build_fields_vocab(fields, counters, data_type, share_vocab,
             counters,
             build_fv_args,
             size_multiple=vocab_size_multiple if not share_vocab else 1)
+        if "constituent_tree" in fields:
+            constituent_tree_multifield = fields["constituent_tree"]
+            _build_fv_from_multifield(
+                constituent_tree_multifield,
+                counters,
+                build_fv_args,
+                size_multiple=1)
         if "src_label" in fields:
             build_fv_args["src_label"] = dict(
                 max_size=src_vocab_size, min_freq=src_words_min_frequency)
