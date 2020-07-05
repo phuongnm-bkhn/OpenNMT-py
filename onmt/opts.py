@@ -649,6 +649,8 @@ def translate_opts(parser):
                    "call tools/test_rouge.py on command line")
     group.add('--report_time', '-report_time', action='store_true',
               help="Report some translation time metrics")
+    group.add('--constituent_tree', '-constituent_tree', required=False, default=None,
+              help="Path of test constituent tree.")
 
     # Options most relevant to summarization.
     group.add('--dynamic_dict', '-dynamic_dict', action='store_true',

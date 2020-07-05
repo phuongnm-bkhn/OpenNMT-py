@@ -113,6 +113,7 @@ class Translator(object):
             fields,
             src_reader,
             tgt_reader,
+            constituent_tree_reader,
             gpu=-1,
             n_best=1,
             min_length=0,
@@ -170,6 +171,7 @@ class Translator(object):
         self._exclusion_idxs = {
             self._tgt_vocab.stoi[t] for t in self.ignore_when_blocking}
         self.src_reader = src_reader
+        self.constituent_tree_reader = constituent_tree_reader
         self.tgt_reader = tgt_reader
         self.replace_unk = replace_unk
         if self.replace_unk and not self.model.decoder.attentional:
@@ -248,11 +250,13 @@ class Translator(object):
 
         src_reader = inputters.str2reader[opt.data_type].from_opt(opt)
         tgt_reader = inputters.str2reader["text"].from_opt(opt)
+        constituent_tree_reader = inputters.str2reader["text"].from_opt(opt)
         return cls(
             model,
             fields,
             src_reader,
             tgt_reader,
+            constituent_tree_reader=constituent_tree_reader,
             gpu=opt.gpu,
             n_best=opt.n_best,
             min_length=opt.min_length,
@@ -327,6 +331,7 @@ class Translator(object):
             self,
             src,
             tgt=None,
+            constituent_tree=None,
             src_dir=None,
             batch_size=None,
             batch_type="sents",
@@ -361,8 +366,9 @@ class Translator(object):
 
         src_data = {"reader": self.src_reader, "data": src, "dir": src_dir}
         tgt_data = {"reader": self.tgt_reader, "data": tgt, "dir": None}
+        constituent_tree_data = {"reader": self.constituent_tree_reader, "data": constituent_tree, "dir": None}
         _readers, _data, _dir = inputters.Dataset.config(
-            [('src', src_data), ('tgt', tgt_data)])
+            [('src', src_data), ('tgt', tgt_data), ('constituent_tree', constituent_tree_data)])
 
         data = inputters.Dataset(
             self.fields, readers=_readers, data=_data, dirs=_dir,
@@ -403,6 +409,7 @@ class Translator(object):
             translations = xlation_builder.from_batch(batch_data)
 
             for trans in translations:
+                # ngram_features.append([trans.src_raw, trans.ngram_features])
                 all_scores += [trans.pred_scores[:self.n_best]]
                 pred_score_total += trans.pred_scores[0]
                 pred_words_total += len(trans.pred_sents[0])
@@ -479,12 +486,12 @@ class Translator(object):
                     tgt_raw = trans.pred_sents[0]
                     attention_infor = [
                         ("self-attn-debug", trans.self_attn[:, :, :len(srcs), :len(srcs)],
-                         srcs, srcs, 1.2),
+                         srcs, srcs, 0.25),
                         ("decoding-self-attn-debug", trans.decoding_self_attn[0][:, :, :len(tgt_raw), :len(tgt_raw)],
-                         ["<s>"] + tgt_raw[:-1], ["<s>"] + tgt_raw[:-1], 1.2),
+                         ["<s>"] + tgt_raw[:-1], ["<s>"] + tgt_raw[:-1], 0.25),
                     ]
                     for (folder_name, self_attn_data, x_stick, y_stick, base_cell) in attention_infor:
-                        viz_attention(self_attn_folder_save, folder_name, self_attn_data, x_stick, y_stick, base_cell,
+                        viz_attention(self_attn_folder_save, folder_name, self_attn_data[:, :], x_stick, y_stick, base_cell,
                                       sent_number=sent_number)
 
                 if align_debug:
@@ -647,7 +654,8 @@ class Translator(object):
             else (batch.src, None)
 
         enc_states, memory_bank, src_lengths = self.model.encoder(
-            src, src_lengths)
+            src, src_lengths,
+            **{"constituent_tree": batch.constituent_tree})
         if src_lengths is None:
             assert not isinstance(memory_bank, tuple), \
                 'Ensemble decoding only supported for text data'
@@ -758,15 +766,7 @@ class Translator(object):
 
         src, enc_states, memory_bank, src_lengths = self._run_encoder(batch)
         if "CombinedTransformerRnnEncoder" in str(type(self.model.encoder)):
-            if "CombinedTransformerRnnDecoder" in str(type(self.model.decoder)):
-                for i, layer in enumerate(self.model.encoder.transformer):
-                    enc_final_state = layer.encoder_state["final_state"]
-                    enc_memory_bank = layer.encoder_state["memory_bank"]
-                    layer.encoder_state = {}
-                    self.model.decoder.transformer_layers[i].feed_rnn_decoder \
-                        .init_state(src, enc_memory_bank, enc_final_state)
-
-            elif "InputFeedRNNDecoder" in str(type(self.model.decoder)):
+            if "InputFeedRNNDecoder" in str(type(self.model.decoder)):
                 enc_final_states = []
                 for i, layer in enumerate(self.model.encoder.transformer):
                     enc_final_state = layer.encoder_state["final_state"]
