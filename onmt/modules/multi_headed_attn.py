@@ -84,6 +84,59 @@ class NgramLSTM(nn.Module):
         return out
 
 
+class NgramDense(nn.Module):
+    def __init__(self, n_gram, input_size):
+        super(NgramDense, self).__init__()
+        self.n_gram = n_gram
+
+        self._num_layers = 1
+        self.input_size = input_size
+        self.hidden_size = input_size
+
+        self.fc_layer = nn.Linear(self.input_size*self.n_gram, self.hidden_size)
+
+    def forward(self, _x):
+        # we need to create a new data input to learn the n-gram (k) feature using LSTM
+        # with origin input (_x) = [emb_1, emb_2, emb_3 .. emb_{seq_length}]: batchsize x seq_length x emb_size
+        n_gram = self.n_gram
+        data_input = _x.unsqueeze(dim=0)
+        data_org = _x
+
+        batch_size = data_org.size(0)
+        seq_length = data_org.size(1)
+        hidden_size = self.hidden_size
+        input_size = self.input_size
+
+        #
+        # 1. add padding k - 1 times =>  [k x batch_size x seq_length x emb_size]
+        #    [zero_1, .. zero_{k-1}, emb_1, emb_2, emb_3 .. emb_{seq_length - k + 1}]: batchsize x seq_length x emb_size
+        #    [zero_1, .. emb_1,      emb_2, emb_3 ..        emb_{seq_length - k + 2}]: batchsize x seq_length x emb_size
+        #    ...
+        #    [emb_1, emb_2, emb_3 ..                        emb_{seq_length}]: batchsize x seq_length x emb_size
+        for i_gram in range(1, n_gram):
+            mt_padd_i = F.pad(data_org.transpose(-1,-2), [i_gram, 0],
+                              mode='constant', value=0).transpose(-1,-2)[:,:-i_gram,:]
+            data_input = torch.cat((mt_padd_i.unsqueeze(dim=0), data_input), dim=0)
+
+            #
+        # reshape input into =>   [(batch_size x seq_length) x k x emb_size]
+        # this mean that we cut the sentence into many sentence piece (k-gram) similar
+        # n-gram in NLP, and combined all set of n-gram treat to LSTM as a batch of input
+        zz = data_input.reshape([n_gram,
+                                 batch_size * seq_length,
+                                 hidden_size]).transpose(0,1)
+
+        zz = zz.reshape([batch_size * seq_length, n_gram*hidden_size])
+
+        # forward data using fully connected
+        out= self.fc_layer(zz)
+
+        # finally, we reshape original batch_size to return
+        # (batch x seq x hidden_size)
+        out = out.reshape(batch_size, -1, hidden_size)
+        return out
+
+
 class MultiHeadedAttention(nn.Module):
     """Multi-Head Attention module from "Attention is All You Need"
     :cite:`DBLP:journals/corr/VaswaniSPUJGKP17`.
@@ -147,9 +200,9 @@ class MultiHeadedAttention(nn.Module):
 
         self.use_ngram_features = use_ngram_features
         if self.use_ngram_features:
-            self.n_gram4_features = NgramLSTM(4, self.dim_per_head) # NgramCombined(4)
-            self.n_gram3_features = NgramLSTM(3, self.dim_per_head) # NgramCombined(3)
-            self.n_gram2_features = NgramLSTM(2, self.dim_per_head) # NgramCombined(2)
+            self.n_gram4_features = NgramDense(4, self.dim_per_head) # NgramLSTM(4, self.dim_per_head) #NgramCombined(4)
+            self.n_gram3_features = NgramDense(3, self.dim_per_head) # NgramCombined(3)
+            self.n_gram2_features = NgramDense(2, self.dim_per_head) # NgramCombined(2)
 
         if max_relative_positions > 0:
             vocab_size = max_relative_positions * 2 + 1
