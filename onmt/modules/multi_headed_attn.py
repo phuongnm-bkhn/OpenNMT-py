@@ -32,7 +32,6 @@ class NgramLSTM(nn.Module):
         self.input_size = input_size
         self.hidden_size = input_size
 
-        self.weights = torch.nn.Parameter(torch.Tensor([[0, 0]]))
         self.rnn = nn.LSTM(self.input_size,
                            self.hidden_size,
                            batch_first=True,
@@ -77,15 +76,14 @@ class NgramLSTM(nn.Module):
         # we sum all directions
         _bank_mt, (_h_n, c_n) = self.rnn(zz)
         _aggregate_hidden_n = torch.cat((_h_n, c_n), dim=0)
-        out = torch.sum(_aggregate_hidden_n, dim=0)
+        out = torch.sum(_aggregate_hidden_n, dim=0).reshape(batch_size, -1, hidden_size)
 
         # finally, we reshape original batch_size to return
         # (batch x seq x hidden_size)
-        out = torch.matmul(torch.softmax(self.weights, dim=0),
-                           torch.cat((out.reshape(-1).unsqueeze(0), _x.reshape(-1).unsqueeze(0)), dim=0)
-                           )
+        rate_local_context = torch.sigmoid(_x)
+        out = rate_local_context*out + (1 - rate_local_context)*_x
 
-        return out.squeeze(dim=0).reshape(batch_size, -1, hidden_size)
+        return out
 
 
 class MultiHeadedAttention(nn.Module):
