@@ -38,7 +38,7 @@ class NgramLSTM(nn.Module):
                            num_layers=self._num_layers,
                            bidirectional=True)
 
-    def forward(self, _x):
+    def forward(self, _x, mask_bpe=None):
         # we need to create a new data input to learn the n-gram (k) feature using LSTM
         # with origin input (_x) = [emb_1, emb_2, emb_3 .. emb_{seq_length}]: batchsize x seq_length x emb_size
         n_gram = self.n_gram
@@ -69,6 +69,26 @@ class NgramLSTM(nn.Module):
                                  batch_size * seq_length,
                                  hidden_size]).transpose(0,1)
 
+        # process mask bpe if not none
+        # init zero for all masked bpe position
+        mask_bpe_org = mask_bpe
+        if mask_bpe is not None:
+            mask_bpe = mask_bpe.unsqueeze(dim=0)
+            for i_gram in range(1, n_gram):
+                mask_bpe_padd_i = F.pad(mask_bpe_org, [i_gram, 0],
+                                        mode='constant', value=0)[:, :-i_gram]
+                mask_bpe = torch.cat((mask_bpe_padd_i.unsqueeze(dim=0), mask_bpe), dim=0)
+            mask_bpe = mask_bpe.reshape([n_gram,
+                                         batch_size * seq_length]).transpose(0, 1)
+
+            # if a bpe word piece exist in ngram spans, set mask for all of it
+            if n_gram >= 2:
+                for i_gram in range(n_gram - 2, -1, -1):
+                    mask_bpe[:, i_gram] = mask_bpe[:, i_gram + 1] | mask_bpe[:, i_gram]
+
+            # set mask bpe is zero - before fw into lstm
+            zz.masked_fill_(mask_bpe.unsqueeze(dim=2), 0)
+
         # forward data using Bi-LSTM
         # we just get the cell state (num_layers * num_directions, batch, hidden_size)
         # because we need to get the long-memmory to extract the k-gram features of words
@@ -81,6 +101,13 @@ class NgramLSTM(nn.Module):
         # finally, we reshape original batch_size to return
         # (batch x seq x hidden_size)
         out = out.reshape(batch_size, -1, hidden_size)
+
+        if mask_bpe_org is not None:
+            # replace the bpe mask by origin matrix
+            out.masked_fill_(mask_bpe_org.unsqueeze(dim=-1), 0)
+            data_org.masked_fill_(torch.logical_not(mask_bpe_org.unsqueeze(dim=-1)), 0)
+            out = out + data_org
+
         return out
 
 
@@ -157,7 +184,7 @@ class MultiHeadedAttention(nn.Module):
                 vocab_size, self.dim_per_head)
 
     def forward(self, key, value, query, mask=None,
-                layer_cache=None, attn_type=None):
+                layer_cache=None, attn_type=None, bpe_info=None):
         """
         Compute the context vector and the attention vectors.
 
@@ -269,39 +296,23 @@ class MultiHeadedAttention(nn.Module):
                 query = query.masked_fill(mask_qkv, 0)
                 key = key.masked_fill(mask_qkv, 0)
                 value = value.masked_fill(mask_qkv, 0)
+            mask_bpe = bpe_info == 1
+            num_head_separate = 2
+            mask_bpe = torch.cat([mask_bpe.unsqueeze(1) for _ in range(num_head_separate)], dim=1)
+            mask_bpe = torch.cat([mask_bpe, mask_bpe, mask_bpe])  # for 3 components: q k v
+            mask_bpe = mask_bpe.reshape(-1, query_len)
 
-            if head_count > 3:
-                _xx = torch.cat([ query[:, 2:4, :, :].reshape(-1, query_len, dim_per_head),
-                        key[:, 2:4, :, :].reshape(-1, query_len, dim_per_head),
-                        value[:, 2:4, :, :].reshape(-1, query_len, dim_per_head)
+            for i, ngram_features_extractor in zip(list(range(num_head_separate, head_count, num_head_separate)),
+                                                   [self.n_gram2_features, self.n_gram3_features, self.n_gram4_features]):
+                _xx = torch.cat([ query[:, i:i+num_head_separate, :, :].reshape(-1, query_len, dim_per_head),
+                        key[:, i:i+num_head_separate, :, :].reshape(-1, query_len, dim_per_head),
+                        value[:, i:i+num_head_separate, :, :].reshape(-1, query_len, dim_per_head)
                        ], dim=0).reshape(-1, query_len, dim_per_head)
-                _yy = self.n_gram2_features(_xx).reshape(3, -1, query_len, dim_per_head)
+                _yy = ngram_features_extractor(_xx, mask_bpe).reshape(3, -1, query_len, dim_per_head)
                 _q, _k, _v = _yy[0], _yy[1], _yy[2]
-                query[:, 2:4, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
-                key[:, 2:4, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
-                value[:, 2:4, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
-
-            if head_count > 5:
-                _xx = torch.cat([ query[:, 4:6, :, :].reshape(-1, query_len, dim_per_head),
-                                  key[:, 4:6, :, :].reshape(-1, query_len, dim_per_head),
-                                  value[:, 4:6, :, :].reshape(-1, query_len, dim_per_head)
-                                  ], dim=0).reshape(-1, query_len, dim_per_head)
-                _yy = self.n_gram3_features(_xx).reshape(3, -1, query_len, dim_per_head)
-                _q, _k, _v = _yy[0], _yy[1], _yy[2]
-                query[:, 4:6, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
-                key[:, 4:6, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
-                value[:, 4:6, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
-
-            if head_count > 7:
-                _xx = torch.cat([ query[:, 6:8, :, :].reshape(-1, query_len, dim_per_head),
-                                  key[:, 6:8, :, :].reshape(-1, query_len, dim_per_head),
-                                  value[:, 6:8, :, :].reshape(-1, query_len, dim_per_head)
-                                  ], dim=0).reshape(-1, query_len, dim_per_head)
-                _yy = self.n_gram4_features(_xx).reshape(3, -1, query_len, dim_per_head)
-                _q, _k, _v = _yy[0], _yy[1], _yy[2]
-                query[:, 6:8, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
-                key[:, 6:8, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
-                value[:, 6:8, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
+                query[:, i:i+num_head_separate, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
+                key[:, i:i+num_head_separate, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
+                value[:, i:i+num_head_separate, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
 
         key_len = key.size(2)
         query_len = query.size(2)

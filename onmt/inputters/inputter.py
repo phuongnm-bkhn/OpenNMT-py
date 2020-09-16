@@ -13,7 +13,7 @@ from torchtext.data import Field, RawField, LabelField
 from torchtext.vocab import Vocab
 from torchtext.data.utils import RandomShuffler
 
-from onmt.inputters.text_dataset import text_fields, TextMultiField
+from onmt.inputters.text_dataset import text_fields, TextMultiField, BpeInfoField
 from onmt.inputters.image_dataset import image_fields
 from onmt.inputters.audio_dataset import audio_fields
 from onmt.inputters.vec_dataset import vec_fields
@@ -161,6 +161,8 @@ def get_fields(
                         "truncate": tgt_truncate,
                         "base_name": "tgt"}
     fields["tgt"] = fields_getters["text"](**tgt_field_kwargs)
+
+    fields["bpe_info"] = BpeInfoField(use_vocab=False, dtype=torch.int, sequential=False)
 
     tgt_field_kwargs = {"n_feats": 0,
                         "include_lengths": False,

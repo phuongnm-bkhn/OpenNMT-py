@@ -192,3 +192,42 @@ def text_fields(**kwargs):
     assert fields_[0][0] == base_name  # sanity check
     field = TextMultiField(fields_[0][0], fields_[0][1], fields_[1:])
     return field
+
+
+class BpeInfoField(Field):
+
+    def pad(self, minibatch):
+        """Pad a batch of examples using this field.
+
+        Pads to self.fix_length if provided, otherwise pads to the length of
+        the longest example in the batch. Prepends self.init_token and appends
+        self.eos_token if those attributes are not None. Returns a tuple of the
+        padded list and a list containing lengths of each example if
+        `self.include_lengths` is `True` and `self.sequential` is `True`, else just
+        returns the padded list. If `self.sequential` is `False`, no padding is applied.
+        """
+        minibatch = list(minibatch)
+        if self.fix_length is None:
+            max_len = max(len(x) for x in minibatch)
+        else:
+            max_len = self.fix_length + (
+                self.init_token, self.eos_token).count(None) - 2
+        padded, lengths = [], []
+        padding_id = 0
+        for x in minibatch:
+            if self.pad_first:
+                padded.append(
+                    [padding_id] * max(0, max_len - len(x))
+                    + ([] if self.init_token is None else [self.init_token])
+                    + list(x[-max_len:] if self.truncate_first else x[:max_len])
+                    + ([] if self.eos_token is None else [self.eos_token]))
+            else:
+                padded.append(
+                    ([] if self.init_token is None else [self.init_token])
+                    + list(x[-max_len:] if self.truncate_first else x[:max_len])
+                    + ([] if self.eos_token is None else [self.eos_token])
+                    + [padding_id] * max(0, max_len - len(x)))
+            lengths.append(len(padded[-1]) - max(0, max_len - len(x)))
+        if self.include_lengths:
+            return (padded, lengths)
+        return padded

@@ -166,6 +166,18 @@ class Dataset(TorchtextDataset):
             for sample in examples:
                 setattr(sample, 'src_label', [transformed_data[sample.indices][3]])
 
+        # add data for word pie
+        for sample in examples:
+            bpe_info = [0]*len(sample.src[0])
+            for i, w in enumerate(sample.src[0]):
+                if w.endswith("@@"):
+                    bpe_info[i] = 1
+                if i > 1 and sample.src[0][i-1].endswith("@@"):
+                    bpe_info[i] = 1  # end of list words piece
+                if w == "|||":
+                    bpe_info[i] = 1
+            setattr(sample, 'bpe_info', bpe_info)
+
         super(Dataset, self).__init__(examples, fields, filter_pred)
 
     def __getattr__(self, attr):
