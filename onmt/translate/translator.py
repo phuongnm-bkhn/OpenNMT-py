@@ -647,7 +647,7 @@ class Translator(object):
             else (batch.src, None)
 
         enc_states, memory_bank, src_lengths = self.model.encoder(
-            src, src_lengths)
+            src, src_lengths, **{"trans_layer_params":{"bpe_info": batch.bpe_info}})
         if src_lengths is None:
             assert not isinstance(memory_bank, tuple), \
                 'Ensemble decoding only supported for text data'

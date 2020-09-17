@@ -87,7 +87,8 @@ class NgramLSTM(nn.Module):
                     mask_bpe[:, i_gram] = mask_bpe[:, i_gram + 1] | mask_bpe[:, i_gram]
 
             # set mask bpe is zero - before fw into lstm
-            zz.masked_fill_(mask_bpe.unsqueeze(dim=2), 0)
+            zz = torch.where(mask_bpe.unsqueeze(dim=-1), torch.zeros_like(zz), zz)
+            # zz.masked_fill_(mask_bpe.unsqueeze(dim=2), 0)
 
         # forward data using Bi-LSTM
         # we just get the cell state (num_layers * num_directions, batch, hidden_size)
@@ -104,9 +105,7 @@ class NgramLSTM(nn.Module):
 
         if mask_bpe_org is not None:
             # replace the bpe mask by origin matrix
-            out.masked_fill_(mask_bpe_org.unsqueeze(dim=-1), 0)
-            data_org.masked_fill_(torch.logical_not(mask_bpe_org.unsqueeze(dim=-1)), 0)
-            out = out + data_org
+            out = torch.where(mask_bpe_org.unsqueeze(dim=-1), data_org, out)
 
         return out
 
