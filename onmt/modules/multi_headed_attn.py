@@ -50,45 +50,42 @@ class NgramLSTM(nn.Module):
         hidden_size = self.hidden_size
         input_size = self.input_size
 
+        # #
+        # # 1. add padding k - 1 times =>  [k x batch_size x seq_length x emb_size]
+        # #    [zero_1, .. zero_{k-1}, emb_1, emb_2, emb_3 .. emb_{seq_length - k + 1}]: batchsize x seq_length x emb_size
+        # #    [zero_1, .. emb_1,      emb_2, emb_3 ..        emb_{seq_length - k + 2}]: batchsize x seq_length x emb_size
+        # #    ...
+        # #    [emb_1, emb_2, emb_3 ..                        emb_{seq_length}]: batchsize x seq_length x emb_size
+        # for i_gram in range(1, n_gram):
+        #     mt_padd_i = F.pad(data_org.transpose(-1,-2), [i_gram, 0],
+        #                       mode='constant', value=0).transpose(-1,-2)[:,:-i_gram,:]
+        #     data_input = torch.cat((mt_padd_i.unsqueeze(dim=0), data_input), dim=0)
         #
-        # 1. add padding k - 1 times =>  [k x batch_size x seq_length x emb_size]
-        #    [zero_1, .. zero_{k-1}, emb_1, emb_2, emb_3 .. emb_{seq_length - k + 1}]: batchsize x seq_length x emb_size
-        #    [zero_1, .. emb_1,      emb_2, emb_3 ..        emb_{seq_length - k + 2}]: batchsize x seq_length x emb_size
-        #    ...
-        #    [emb_1, emb_2, emb_3 ..                        emb_{seq_length}]: batchsize x seq_length x emb_size
-        for i_gram in range(1, n_gram):
-            mt_padd_i = F.pad(data_org.transpose(-1,-2), [i_gram, 0],
-                              mode='constant', value=0).transpose(-1,-2)[:,:-i_gram,:]
-            data_input = torch.cat((mt_padd_i.unsqueeze(dim=0), data_input), dim=0)
+        #     #
+        # # reshape input into =>   [(batch_size x seq_length) x k x emb_size]
+        # # this mean that we cut the sentence into many sentence piece (k-gram) similar
+        # # n-gram in NLP, and combined all set of n-gram treat to LSTM as a batch of input
+        # zz = data_input.reshape([n_gram,
+        #                          batch_size * seq_length,
+        #                          hidden_size]).transpose(0,1)
 
-            #
-        # reshape input into =>   [(batch_size x seq_length) x k x emb_size]
-        # this mean that we cut the sentence into many sentence piece (k-gram) similar
-        # n-gram in NLP, and combined all set of n-gram treat to LSTM as a batch of input
-        zz = data_input.reshape([n_gram,
-                                 batch_size * seq_length,
-                                 hidden_size]).transpose(0,1)
-
-        # # process mask bpe if not none
-        # # init zero for all masked bpe position
-        mask_bpe_org = mask_bpe
-        # if mask_bpe is not None:
-        #     mask_bpe = mask_bpe.unsqueeze(dim=0)
-        #     for i_gram in range(1, n_gram):
-        #         mask_bpe_padd_i = F.pad(mask_bpe_org, [i_gram, 0],
-        #                                 mode='constant', value=0)[:, :-i_gram]
-        #         mask_bpe = torch.cat((mask_bpe_padd_i.unsqueeze(dim=0), mask_bpe), dim=0)
-        #     mask_bpe = mask_bpe.reshape([n_gram,
-        #                                  batch_size * seq_length]).transpose(0, 1)
-        #
-        #     # if a bpe word piece exist in ngram spans, set mask for all of it
-        #     if n_gram >= 2:
-        #         for i_gram in range(n_gram - 2, -1, -1):
-        #             mask_bpe[:, i_gram] = mask_bpe[:, i_gram + 1] | mask_bpe[:, i_gram]
-        #
-        #     # set mask bpe is zero - before fw into lstm
-        #     zz = torch.where(mask_bpe.unsqueeze(dim=-1), torch.zeros_like(zz), zz)
-        #     # zz.masked_fill_(mask_bpe.unsqueeze(dim=2), 0)
+        rnn_batch_inputs = []
+        for i_batch in range(batch_size):
+            normal_word_index = [0]*(n_gram)
+            for i_w in range(seq_length):
+                if mask_bpe[i_batch, i_w] == 0:
+                    rnn_batch_inputs.append(torch.zeros(1, hidden_size))
+                elif mask_bpe[i_batch, i_w] == 1:
+                    rnn_batch_inputs.append(data_org[i_batch,
+                                            normal_word_index[-n_gram+1]: i_w+1])
+                    normal_word_index.append(i_w)
+                elif mask_bpe[i_batch, i_w] == 2:
+                    rnn_batch_inputs.append(data_org[i_batch,
+                                            normal_word_index[-n_gram]: i_w+1])
+                elif mask_bpe[i_batch, i_w] == 3:
+                    rnn_batch_inputs.append(data_org[i_batch, i_w:i_w+1])
+                    normal_word_index = normal_word_index + [i_w]*(n_gram)
+        zz = torch.nn.utils.rnn.pad_sequence(rnn_batch_inputs, batch_first=True)
 
         # forward data using Bi-LSTM
         # we just get the cell state (num_layers * num_directions, batch, hidden_size)
@@ -103,9 +100,9 @@ class NgramLSTM(nn.Module):
         # (batch x seq x hidden_size)
         out = out.reshape(batch_size, -1, hidden_size)
 
-        if mask_bpe_org is not None:
-            # replace the bpe mask by origin matrix
-            out = torch.where(mask_bpe_org.unsqueeze(dim=-1), data_org, out)
+        # if mask_bpe_org is not None:
+        #     # replace the bpe mask by origin matrix
+        #     out = torch.where(mask_bpe_org.unsqueeze(dim=-1), data_org, out)
 
         return out
 
@@ -295,7 +292,7 @@ class MultiHeadedAttention(nn.Module):
                 query = query.masked_fill(mask_qkv, 0)
                 key = key.masked_fill(mask_qkv, 0)
                 value = value.masked_fill(mask_qkv, 0)
-            mask_bpe = bpe_info == 1
+            mask_bpe = bpe_info # == 1
             num_head_separate = 2
             mask_bpe = torch.cat([mask_bpe.unsqueeze(1) for _ in range(num_head_separate)], dim=1)
             mask_bpe = torch.cat([mask_bpe, mask_bpe, mask_bpe])  # for 3 components: q k v
