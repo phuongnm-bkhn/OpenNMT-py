@@ -69,26 +69,26 @@ class NgramLSTM(nn.Module):
                                  batch_size * seq_length,
                                  hidden_size]).transpose(0,1)
 
-        # process mask bpe if not none
-        # init zero for all masked bpe position
+        # # process mask bpe if not none
+        # # init zero for all masked bpe position
         mask_bpe_org = mask_bpe
-        if mask_bpe is not None:
-            mask_bpe = mask_bpe.unsqueeze(dim=0)
-            for i_gram in range(1, n_gram):
-                mask_bpe_padd_i = F.pad(mask_bpe_org, [i_gram, 0],
-                                        mode='constant', value=0)[:, :-i_gram]
-                mask_bpe = torch.cat((mask_bpe_padd_i.unsqueeze(dim=0), mask_bpe), dim=0)
-            mask_bpe = mask_bpe.reshape([n_gram,
-                                         batch_size * seq_length]).transpose(0, 1)
-
-            # if a bpe word piece exist in ngram spans, set mask for all of it
-            if n_gram >= 2:
-                for i_gram in range(n_gram - 2, -1, -1):
-                    mask_bpe[:, i_gram] = mask_bpe[:, i_gram + 1] | mask_bpe[:, i_gram]
-
-            # set mask bpe is zero - before fw into lstm
-            zz = torch.where(mask_bpe.unsqueeze(dim=-1), torch.zeros_like(zz), zz)
-            # zz.masked_fill_(mask_bpe.unsqueeze(dim=2), 0)
+        # if mask_bpe is not None:
+        #     mask_bpe = mask_bpe.unsqueeze(dim=0)
+        #     for i_gram in range(1, n_gram):
+        #         mask_bpe_padd_i = F.pad(mask_bpe_org, [i_gram, 0],
+        #                                 mode='constant', value=0)[:, :-i_gram]
+        #         mask_bpe = torch.cat((mask_bpe_padd_i.unsqueeze(dim=0), mask_bpe), dim=0)
+        #     mask_bpe = mask_bpe.reshape([n_gram,
+        #                                  batch_size * seq_length]).transpose(0, 1)
+        #
+        #     # if a bpe word piece exist in ngram spans, set mask for all of it
+        #     if n_gram >= 2:
+        #         for i_gram in range(n_gram - 2, -1, -1):
+        #             mask_bpe[:, i_gram] = mask_bpe[:, i_gram + 1] | mask_bpe[:, i_gram]
+        #
+        #     # set mask bpe is zero - before fw into lstm
+        #     zz = torch.where(mask_bpe.unsqueeze(dim=-1), torch.zeros_like(zz), zz)
+        #     # zz.masked_fill_(mask_bpe.unsqueeze(dim=2), 0)
 
         # forward data using Bi-LSTM
         # we just get the cell state (num_layers * num_directions, batch, hidden_size)
