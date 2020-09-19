@@ -41,7 +41,7 @@ class NgramLSTM(nn.Module):
     def forward(self, _x, mask_bpe=None):
         # we need to create a new data input to learn the n-gram (k) feature using LSTM
         # with origin input (_x) = [emb_1, emb_2, emb_3 .. emb_{seq_length}]: batchsize x seq_length x emb_size
-        n_gram = self.n_gram
+        n_gram = mask_bpe.shape[-1] #self.n_gram
         data_input = _x.unsqueeze(dim=0)
         data_org = _x
 
@@ -50,42 +50,25 @@ class NgramLSTM(nn.Module):
         hidden_size = self.hidden_size
         input_size = self.input_size
 
-        # #
-        # # 1. add padding k - 1 times =>  [k x batch_size x seq_length x emb_size]
-        # #    [zero_1, .. zero_{k-1}, emb_1, emb_2, emb_3 .. emb_{seq_length - k + 1}]: batchsize x seq_length x emb_size
-        # #    [zero_1, .. emb_1,      emb_2, emb_3 ..        emb_{seq_length - k + 2}]: batchsize x seq_length x emb_size
-        # #    ...
-        # #    [emb_1, emb_2, emb_3 ..                        emb_{seq_length}]: batchsize x seq_length x emb_size
-        # for i_gram in range(1, n_gram):
-        #     mt_padd_i = F.pad(data_org.transpose(-1,-2), [i_gram, 0],
-        #                       mode='constant', value=0).transpose(-1,-2)[:,:-i_gram,:]
-        #     data_input = torch.cat((mt_padd_i.unsqueeze(dim=0), data_input), dim=0)
         #
-        #     #
-        # # reshape input into =>   [(batch_size x seq_length) x k x emb_size]
-        # # this mean that we cut the sentence into many sentence piece (k-gram) similar
-        # # n-gram in NLP, and combined all set of n-gram treat to LSTM as a batch of input
-        # zz = data_input.reshape([n_gram,
-        #                          batch_size * seq_length,
-        #                          hidden_size]).transpose(0,1)
+        # 1. add padding k - 1 times =>  [k x batch_size x seq_length x emb_size]
+        #    [zero_1, .. zero_{k-1}, emb_1, emb_2, emb_3 .. emb_{seq_length - k + 1}]: batchsize x seq_length x emb_size
+        #    [zero_1, .. emb_1,      emb_2, emb_3 ..        emb_{seq_length - k + 2}]: batchsize x seq_length x emb_size
+        #    ...
+        #    [emb_1, emb_2, emb_3 ..                        emb_{seq_length}]: batchsize x seq_length x emb_size
+        for i_gram in range(1, n_gram):
+            mt_padd_i = F.pad(data_org.transpose(-1,-2), [i_gram, 0],
+                              mode='constant', value=0).transpose(-1,-2)[:,:-i_gram,:]
+            data_input = torch.cat((mt_padd_i.unsqueeze(dim=0), data_input), dim=0)
 
-        rnn_batch_inputs = []
-        for i_batch in range(batch_size):
-            normal_word_index = [0]*(n_gram)
-            for i_w in range(seq_length):
-                if mask_bpe[i_batch, i_w] == 0:
-                    rnn_batch_inputs.append(torch.zeros(1, hidden_size))
-                elif mask_bpe[i_batch, i_w] == 1:
-                    rnn_batch_inputs.append(data_org[i_batch,
-                                            normal_word_index[-n_gram+1]: i_w+1])
-                    normal_word_index.append(i_w)
-                elif mask_bpe[i_batch, i_w] == 2:
-                    rnn_batch_inputs.append(data_org[i_batch,
-                                            normal_word_index[-n_gram]: i_w+1])
-                elif mask_bpe[i_batch, i_w] == 3:
-                    rnn_batch_inputs.append(data_org[i_batch, i_w:i_w+1])
-                    normal_word_index = normal_word_index + [i_w]*(n_gram)
-        zz = torch.nn.utils.rnn.pad_sequence(rnn_batch_inputs, batch_first=True)
+            #
+        # reshape input into =>   [(batch_size x seq_length) x k x emb_size]
+        # this mean that we cut the sentence into many sentence piece (k-gram) similar
+        # n-gram in NLP, and combined all set of n-gram treat to LSTM as a batch of input
+        zz = data_input.reshape([n_gram,
+                                 batch_size * seq_length,
+                                 hidden_size]).transpose(0,1)
+        zz = zz.masked_fill(mask_bpe.unsqueeze(-1), 0)
 
         # forward data using Bi-LSTM
         # we just get the cell state (num_layers * num_directions, batch, hidden_size)
@@ -294,12 +277,19 @@ class MultiHeadedAttention(nn.Module):
                 value = value.masked_fill(mask_qkv, 0)
             mask_bpe = bpe_info # == 1
             num_head_separate = 2
-            mask_bpe = torch.cat([mask_bpe.unsqueeze(1) for _ in range(num_head_separate)], dim=1)
-            mask_bpe = torch.cat([mask_bpe, mask_bpe, mask_bpe])  # for 3 components: q k v
-            mask_bpe = mask_bpe.reshape(-1, query_len)
+            # mask_bpe = torch.cat([mask_bpe.unsqueeze(1) for _ in range(num_head_separate)], dim=1)
+            # mask_bpe = torch.cat([mask_bpe, mask_bpe, mask_bpe])  # for 3 components: q k v
+            # mask_bpe = mask_bpe.reshape(-1, query_len)
 
             for i, ngram_features_extractor in zip(list(range(num_head_separate, head_count, num_head_separate)),
                                                    [self.n_gram2_features, self.n_gram3_features, self.n_gram4_features]):
+                # compute mask
+                mask_bpe = bpe_info[ngram_features_extractor.n_gram]
+                max_ngram_bpe = mask_bpe.shape[-1]
+                mask_bpe = torch.cat([mask_bpe.unsqueeze(1) for _ in range(num_head_separate)], dim=1)
+                mask_bpe = torch.cat([mask_bpe, mask_bpe, mask_bpe])
+                mask_bpe = mask_bpe.reshape(-1, max_ngram_bpe)
+
                 _xx = torch.cat([ query[:, i:i+num_head_separate, :, :].reshape(-1, query_len, dim_per_head),
                         key[:, i:i+num_head_separate, :, :].reshape(-1, query_len, dim_per_head),
                         value[:, i:i+num_head_separate, :, :].reshape(-1, query_len, dim_per_head)

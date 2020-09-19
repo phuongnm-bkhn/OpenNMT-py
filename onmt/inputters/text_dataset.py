@@ -195,6 +195,42 @@ def text_fields(**kwargs):
 
 
 class BpeInfoField(Field):
+    def process(self, batch, device=None):
+        """ Process a list of examples to create a torch.Tensor.
+
+        Pad, numericalize, and postprocess a batch and create a tensor.
+
+        Args:
+            batch (list(object)): A list of object from a batch of examples.
+        Returns:
+            torch.autograd.Variable: Processed object given the input
+            and custom postprocessing Pipeline.
+        """
+        padded = self.pad(batch)
+        # tensor = self.numericalize(padded, device=device)
+        batch_size = len(batch)
+        seq_length = len(padded[0])
+
+        bpe_info_split_by_ngram = {}
+        for n_gram in [2, 3, 4]:
+            rnn_batch_inputs = []
+            for i_batch in range(batch_size):
+                normal_word_index = [0]*n_gram
+                for i_w in range(seq_length):
+                    if padded[i_batch][i_w] == 0:
+                        rnn_batch_inputs.append(torch.Tensor([0]))
+                    elif padded[i_batch][i_w] == 1:
+                        rnn_batch_inputs.append(torch.Tensor([0]*(i_w+1 - normal_word_index[-n_gram+1])))
+                        normal_word_index.append(i_w)
+                    elif padded[i_batch][i_w] == 2:
+                        rnn_batch_inputs.append(torch.Tensor([0]*(i_w+1 - normal_word_index[-n_gram])))
+                    elif padded[i_batch][i_w] == 3:
+                        rnn_batch_inputs.append(torch.Tensor([0]))
+                        normal_word_index = normal_word_index + [i_w]*n_gram
+            zz = torch.nn.utils.rnn.pad_sequence(rnn_batch_inputs, batch_first=True, padding_value=1)
+            zz = torch.flip(zz, dims=[-1])
+            bpe_info_split_by_ngram[n_gram] = torch.tensor(zz==1, device=device).reshape(batch_size, seq_length, -1)
+        return bpe_info_split_by_ngram
 
     def pad(self, minibatch):
         """Pad a batch of examples using this field.
