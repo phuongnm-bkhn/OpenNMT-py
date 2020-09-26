@@ -26,13 +26,14 @@ class TransformerDecoderLayer(nn.Module):
     def __init__(self, d_model, heads, d_ff, dropout, attention_dropout,
                  self_attn_type="scaled-dot", max_relative_positions=0,
                  aan_useffn=False, full_context_alignment=False,
-                 alignment_heads=None):
+                 alignment_heads=None, gram_sizes=None):
         super(TransformerDecoderLayer, self).__init__()
 
         if self_attn_type == "scaled-dot":
             self.self_attn = MultiHeadedAttention(
                 heads, d_model, dropout=dropout,
-                max_relative_positions=max_relative_positions)
+                max_relative_positions=max_relative_positions,
+                gram_sizes=gram_sizes, in_decoder=True)
         elif self_attn_type == "average":
             self.self_attn = AverageAttention(d_model,
                                               dropout=attention_dropout,
@@ -188,7 +189,8 @@ class TransformerDecoder(DecoderBase):
                  copy_attn, self_attn_type, dropout, attention_dropout,
                  embeddings, max_relative_positions, aan_useffn,
                  full_context_alignment, alignment_layer,
-                 alignment_heads=None):
+                 alignment_heads=None,
+                 gram_sizes=None):
         super(TransformerDecoder, self).__init__()
 
         self.embeddings = embeddings
@@ -202,7 +204,7 @@ class TransformerDecoder(DecoderBase):
              max_relative_positions=max_relative_positions,
              aan_useffn=aan_useffn,
              full_context_alignment=full_context_alignment,
-             alignment_heads=alignment_heads)
+             alignment_heads=alignment_heads, gram_sizes=gram_sizes)
              for i in range(num_layers)])
 
         # previously, there was a GlobalAttention module here for copy
@@ -231,7 +233,9 @@ class TransformerDecoder(DecoderBase):
             opt.aan_useffn,
             opt.full_context_alignment,
             opt.alignment_layer,
-            alignment_heads=opt.alignment_heads)
+            alignment_heads=opt.alignment_heads,
+            gram_sizes=opt.gram_sizes
+        )
 
     def init_state(self, src, memory_bank, enc_hidden):
         """Initialize decoder state."""
