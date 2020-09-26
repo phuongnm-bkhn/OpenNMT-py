@@ -206,6 +206,8 @@ def model_opts(parser):
               help="lambda to adjust error rate between source and target label.")
     group.add('--marking_mechanism', '-marking_mechanism', action="store_true", default=False,
               help="Marking mechanism when build model.")
+    group.add('--gram_sizes', '-gram_sizes',default=[], nargs='*', type=int,
+              help="gram sizes. See Phrase Transformer.")
 
 def preprocess_opts(parser):
     """ Pre-procesing options """
