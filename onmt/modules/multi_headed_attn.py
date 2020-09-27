@@ -264,6 +264,8 @@ class MultiHeadedAttention(nn.Module):
                 relative_positions_matrix.to(key.device))
 
         query = shape(query)
+        key_len = key.size(2)
+        query_len = query.size(2)
 
         # ngram feature for q, k, v
         if self.n_gram_features is not None:
@@ -282,19 +284,19 @@ class MultiHeadedAttention(nn.Module):
                     idx_head_layer += count_h_using
                     continue
                 ngram_features_extractor = self.n_gram_features["{}_gram_features".format(gram_size)]
-                _xx = torch.cat([ query[:, idx_head_layer:idx_head_layer+count_h_using, :, :].reshape(-1, query_len, dim_per_head),
-                                  key[:, idx_head_layer:idx_head_layer+count_h_using, :, :].reshape(-1, query_len, dim_per_head),
-                                  value[:, idx_head_layer:idx_head_layer+count_h_using, :, :].reshape(-1, query_len, dim_per_head)
-                                  ], dim=0).reshape(-1, query_len, dim_per_head)
-                _yy = ngram_features_extractor(_xx).reshape(3, -1, query_len, dim_per_head)
-                _q, _k, _v = _yy[0], _yy[1], _yy[2]
+                _xx = query[:, idx_head_layer:idx_head_layer+count_h_using, :, :].reshape(-1, query_len, dim_per_head)
+                _q = ngram_features_extractor(_xx).reshape(-1, query_len, dim_per_head)
                 query[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
-                key[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
-                value[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
-                idx_head_layer += count_h_using
 
-        key_len = key.size(2)
-        query_len = query.size(2)
+                _xx = torch.cat([ key[:, idx_head_layer:idx_head_layer+count_h_using, :, :].reshape(-1, key_len, dim_per_head),
+                                  value[:, idx_head_layer:idx_head_layer+count_h_using, :, :].reshape(-1, key_len, dim_per_head)
+                                  ], dim=0).reshape(-1, query_len, dim_per_head)
+                _yy = ngram_features_extractor(_xx).reshape(2, -1, key_len, dim_per_head)
+                _k, _v = _yy[0], _yy[1]
+                key[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _k.reshape(batch_size, -1, key_len, dim_per_head)
+                value[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _v.reshape(batch_size, -1, key_len, dim_per_head)
+
+                idx_head_layer += count_h_using
 
         # 2) Calculate and scale scores.
         query = query / math.sqrt(dim_per_head)
