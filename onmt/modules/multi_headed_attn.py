@@ -221,6 +221,7 @@ class MultiHeadedAttention(nn.Module):
                                     self.linear_values(query)
                 key = shape(key)
                 value = shape(value)
+                query_cached = shape(query)
                 if layer_cache["self_keys"] is not None:
                     key = torch.cat(
                         (layer_cache["self_keys"], key),
@@ -229,8 +230,13 @@ class MultiHeadedAttention(nn.Module):
                     value = torch.cat(
                         (layer_cache["self_values"], value),
                         dim=2)
+                if layer_cache["self_queries"] is not None:
+                    query_cached = torch.cat(
+                        (layer_cache["self_queries"], query_cached),
+                        dim=2)
                 layer_cache["self_keys"] = key
                 layer_cache["self_values"] = value
+                layer_cache["self_queries"] = query_cached
             elif attn_type == "context":
                 query = self.linear_query(query)
                 if layer_cache["memory_keys"] is None:
@@ -269,34 +275,66 @@ class MultiHeadedAttention(nn.Module):
 
         # ngram feature for q, k, v
         if self.n_gram_features is not None:
-            if mask is not None:
-                if self.in_decoder:
-                    mask_qkv = mask[:, -1, :].unsqueeze(1).unsqueeze(-1)
-                else:
-                    mask_qkv = mask.unsqueeze(-1)  # [B, 1, seq_len, 1]
-                query = query.masked_fill(mask_qkv, 0)
-                key = key.masked_fill(mask_qkv, 0)
-                value = value.masked_fill(mask_qkv, 0)
-
-            idx_head_layer = 0
-            for gram_size, count_h_using in self.n_gram_features_count.items():
-                if gram_size == 0:
+            if self.in_decoder and layer_cache is not None and attn_type == "self" and (
+                    layer_cache["self_queries"] is not None and layer_cache["self_keys"] is not None and
+                    layer_cache["self_values"] is not None
+            ):
+                _q, _k, _v = layer_cache["self_queries"], layer_cache["self_keys"], layer_cache["self_values"]
+                idx_head_layer = 0
+                _seq_len = _q.size(2)
+                for gram_size, count_h_using in self.n_gram_features_count.items():
+                    if gram_size == 0:
+                        idx_head_layer += count_h_using
+                        continue
+                    ngram_features_extractor = self.n_gram_features["{}_gram_features".format(gram_size)]
+                    _xx = torch.cat([ _q[:, idx_head_layer:idx_head_layer+count_h_using, :, :].reshape(-1, _seq_len, dim_per_head),
+                                      _k[:, idx_head_layer:idx_head_layer+count_h_using, :, :].reshape(-1, _seq_len, dim_per_head),
+                                      _v[:, idx_head_layer:idx_head_layer+count_h_using, :, :].reshape(-1, _seq_len, dim_per_head)
+                                      ], dim=0).reshape(-1, _seq_len, dim_per_head)
+                    _yy = ngram_features_extractor(_xx).reshape(3, -1, _seq_len, dim_per_head)
+                    __q, __k, __v = _yy[0], _yy[1], _yy[2]
+                    _q[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = __q.reshape(batch_size, -1, _seq_len, dim_per_head)
+                    _k[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = __k.reshape(batch_size, -1, _seq_len, dim_per_head)
+                    _v[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = __v.reshape(batch_size, -1, _seq_len, dim_per_head)
                     idx_head_layer += count_h_using
-                    continue
-                ngram_features_extractor = self.n_gram_features["{}_gram_features".format(gram_size)]
-                _xx = query[:, idx_head_layer:idx_head_layer+count_h_using, :, :].reshape(-1, query_len, dim_per_head)
-                _q = ngram_features_extractor(_xx).reshape(-1, query_len, dim_per_head)
-                query[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
+                key, value = _k, _v
+                query = _q[:, :, -query.shape[2]:, :]
+                layer_cache["self_queries"], layer_cache["self_keys"], layer_cache["self_values"] = _q, _k, _v
+            else:
+                if mask is not None:
+                    if self.in_decoder:
+                        mask_qkv = mask[:, -1, :].unsqueeze(1).unsqueeze(-1)
+                    else:
+                        mask_qkv = mask.unsqueeze(-1)  # [B, 1, seq_len, 1]
+                    query = query.masked_fill(mask_qkv, 0)
+                    key = key.masked_fill(mask_qkv, 0)
+                    value = value.masked_fill(mask_qkv, 0)
 
-                _xx = torch.cat([ key[:, idx_head_layer:idx_head_layer+count_h_using, :, :].reshape(-1, key_len, dim_per_head),
-                                  value[:, idx_head_layer:idx_head_layer+count_h_using, :, :].reshape(-1, key_len, dim_per_head)
-                                  ], dim=0).reshape(-1, query_len, dim_per_head)
-                _yy = ngram_features_extractor(_xx).reshape(2, -1, key_len, dim_per_head)
-                _k, _v = _yy[0], _yy[1]
-                key[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _k.reshape(batch_size, -1, key_len, dim_per_head)
-                value[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _v.reshape(batch_size, -1, key_len, dim_per_head)
+                idx_head_layer = 0
+                for gram_size, count_h_using in self.n_gram_features_count.items():
+                    if gram_size == 0:
+                        idx_head_layer += count_h_using
+                        continue
+                    ngram_features_extractor = self.n_gram_features["{}_gram_features".format(gram_size)]
+                    _xx = torch.cat([ query[:, idx_head_layer:idx_head_layer+count_h_using, :, :].reshape(-1, query_len, dim_per_head),
+                                      key[:, idx_head_layer:idx_head_layer+count_h_using, :, :].reshape(-1, query_len, dim_per_head),
+                                      value[:, idx_head_layer:idx_head_layer+count_h_using, :, :].reshape(-1, query_len, dim_per_head)
+                                      ], dim=0).reshape(-1, query_len, dim_per_head)
+                    _yy = ngram_features_extractor(_xx).reshape(3, -1, query_len, dim_per_head)
+                    _q, _k, _v = _yy[0], _yy[1], _yy[2]
+                    query[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
+                    key[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
+                    value[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
 
-                idx_head_layer += count_h_using
+                    idx_head_layer += count_h_using
+
+            # if b_save_state:
+            #     _current_shape = _current_k.shape
+            #     key = torch.cat((layer_cache["self_keys"][:, :, :-_current_shape[2], :], _current_k),  dim=2)
+            #     value = torch.cat((layer_cache["self_values"][:, :, :-_current_shape[2], :], _current_v),  dim=2)
+            #     # caching layers
+            #     layer_cache["self_keys"] = key
+            #     layer_cache["self_values"] = value
 
         # 2) Calculate and scale scores.
         query = query / math.sqrt(dim_per_head)
