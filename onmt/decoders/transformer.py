@@ -321,6 +321,7 @@ class TransformerDecoder(DecoderBase):
             else:
                 layer_cache["self_keys"] = None
                 layer_cache["self_values"] = None
+                layer_cache["self_queries"] = None
             self.state["cache"]["layer_{}".format(i)] = layer_cache
 
     def update_dropout(self, dropout, attention_dropout):
