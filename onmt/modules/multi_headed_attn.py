@@ -24,19 +24,24 @@ class NgramCombined(nn.Module):
 
 
 class NgramLSTM(nn.Module):
-    def __init__(self, n_gram, input_size):
+    def __init__(self, n_gram, input_size, in_decoder):
         super(NgramLSTM, self).__init__()
         self.n_gram = n_gram
 
         self._num_layers = 1
         self.input_size = input_size
         self.hidden_size = input_size
+        self.in_decoder = in_decoder
+        if self.in_decoder:
+            self.bidirectional = False
+        else:
+            self.bidirectional = True
 
         self.rnn = nn.LSTM(self.input_size,
                            self.hidden_size,
                            batch_first=False,
                            num_layers=self._num_layers,
-                           bidirectional=True)
+                           bidirectional=self.bidirectional)
 
     def forward(self, _x):
         # we need to create a new data input to learn the n-gram (k) feature using LSTM
@@ -148,7 +153,7 @@ class MultiHeadedAttention(nn.Module):
         self.in_decoder = in_decoder
         self.n_gram_features = None
         if gram_sizes is not None and len(gram_sizes) == head_count:
-            ngram_size_info = dict([("{}_gram_features".format(gram_size), NgramLSTM(gram_size, self.dim_per_head))
+            ngram_size_info = dict([("{}_gram_features".format(gram_size), NgramLSTM(gram_size, self.dim_per_head, in_decoder))
                                     for gram_size in set(gram_sizes) if gram_size > 0])
             self.n_gram_features = nn.ModuleDict(ngram_size_info)
             self.n_gram_features_count = dict([(gram_size, len([_x for _x in gram_sizes if _x == gram_size]))
@@ -299,7 +304,7 @@ class MultiHeadedAttention(nn.Module):
                     idx_head_layer += count_h_using
                 key, value = _k, _v
                 query = _q[:, :, -query.shape[2]:, :]
-                layer_cache["self_queries"], layer_cache["self_keys"], layer_cache["self_values"] = _q, _k, _v
+                # layer_cache["self_queries"], layer_cache["self_keys"], layer_cache["self_values"] = _q, _k, _v
             else:
                 if mask is not None:
                     if self.in_decoder:
