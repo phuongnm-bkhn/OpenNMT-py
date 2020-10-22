@@ -62,6 +62,7 @@ class AlignField(LabelField):
     """
     Parse ['<src>-<tgt>', ...] into ['<src>','<tgt>', ...]
     """
+
     def __init__(self, **kwargs):
         kwargs['use_vocab'] = False
         kwargs['preprocessing'] = parse_align_idx
@@ -173,6 +174,9 @@ def get_fields(
     indices = Field(use_vocab=False, dtype=torch.long, sequential=False)
     fields["indices"] = indices
 
+    corpus_ids = Field(use_vocab=True, sequential=False)
+    fields["corpus_id"] = corpus_ids
+
     if dynamic_dict:
         src_map = Field(
             use_vocab=False, dtype=torch.float,
@@ -192,6 +196,48 @@ def get_fields(
         fields["align"] = word_align
 
     return fields
+
+
+def patch_fields(opt, fields):
+    dvocab = torch.load(opt.data + '.vocab.pt')
+    maybe_cid_field = dvocab.get('corpus_id', None)
+    if maybe_cid_field is not None:
+        fields.update({'corpus_id': maybe_cid_field})
+
+
+class IterOnDevice(object):
+    """Sent items from `iterable` on `device_id` and yield."""
+
+    def __init__(self, iterable, device_id):
+        self.iterable = iterable
+        self.device_id = device_id
+
+    @staticmethod
+    def batch_to_device(batch, device_id):
+        """Move `batch` to `device_id`, cpu if `device_id` < 0."""
+        curr_device = batch.indices.device
+        device = torch.device(device_id) if device_id >= 0 \
+            else torch.device('cpu')
+        if curr_device != device:
+            if isinstance(batch.src, tuple):
+                batch.src = tuple([_.to(device) for _ in batch.src])
+            else:
+                batch.src = batch.src.to(device)
+            batch.tgt = batch.tgt.to(device)
+            batch.indices = batch.indices.to(device)
+            batch.alignment = batch.alignment.to(device) \
+                if hasattr(batch, 'alignment') else None
+            batch.src_map = batch.src_map.to(device) \
+                if hasattr(batch, 'src_map') else None
+            batch.align = batch.align.to(device) \
+                if hasattr(batch, 'align') else None
+            batch.corpus_id = batch.corpus_id.to(device) \
+                if hasattr(batch, 'corpus_id') else None
+
+    def __iter__(self):
+        for batch in self.iterable:
+            self.batch_to_device(batch, self.device_id)
+            yield batch
 
 
 def load_old_vocab(vocab, data_type="text", dynamic_dict=False):
@@ -372,7 +418,9 @@ def _build_fv_from_multifield(multifield, counters, build_fv_args,
 def _build_fields_vocab(fields, counters, data_type, share_vocab,
                         vocab_size_multiple,
                         src_vocab_size, src_words_min_frequency,
-                        tgt_vocab_size, tgt_words_min_frequency):
+                        tgt_vocab_size, tgt_words_min_frequency,
+                        subword_prefix="▁",
+                        subword_prefix_is_joiner=False):
     build_fv_args = defaultdict(dict)
     build_fv_args["src"] = dict(
         max_size=src_vocab_size, min_freq=src_words_min_frequency)
@@ -384,6 +432,11 @@ def _build_fields_vocab(fields, counters, data_type, share_vocab,
         counters,
         build_fv_args,
         size_multiple=vocab_size_multiple if not share_vocab else 1)
+
+    if fields.get("corpus_id", False):
+        fields["corpus_id"].vocab = fields["corpus_id"].vocab_cls(
+            counters["corpus_id"])
+
     if data_type == 'text':
         src_multifield = fields["src"]
         _build_fv_from_multifield(
@@ -411,7 +464,36 @@ def _build_fields_vocab(fields, counters, data_type, share_vocab,
                 vocab_size_multiple=vocab_size_multiple)
             logger.info(" * merged vocab size: %d." % len(src_field.vocab))
 
+        build_noise_field(
+            src_multifield.base_field,
+            subword_prefix=subword_prefix,
+            is_joiner=subword_prefix_is_joiner)
     return fields
+
+
+def build_noise_field(src_field, subword=True,
+                      subword_prefix="▁", is_joiner=False,
+                      sentence_breaks=[".", "?", "!"]):
+    """In place add noise related fields i.e.:
+         - word_start
+         - end_of_sentence
+    """
+    if subword:
+        def is_word_start(x): return (x.startswith(subword_prefix) ^ is_joiner)
+        sentence_breaks = [subword_prefix + t for t in sentence_breaks]
+    else:
+        def is_word_start(x): return True
+
+    vocab_size = len(src_field.vocab)
+    word_start_mask = torch.zeros([vocab_size]).bool()
+    end_of_sentence_mask = torch.zeros([vocab_size]).bool()
+    for i, t in enumerate(src_field.vocab.itos):
+        if is_word_start(t):
+            word_start_mask[i] = True
+        if t in sentence_breaks:
+            end_of_sentence_mask[i] = True
+    src_field.word_start_mask = word_start_mask
+    src_field.end_of_sentence_mask = end_of_sentence_mask
 
 
 def build_vocab(train_dataset_files, fields, data_type, share_vocab,
@@ -644,8 +726,10 @@ def batch_iter(data, batch_size, batch_size_fn=None, batch_size_multiple=1):
             else:
                 if overflowed == len(minibatch):
                     logger.warning(
-                        "An example was ignored, more tokens"
-                        " than allowed by tokens batch_size")
+                        "The batch will be filled until we reach %d,"
+                        "its size may exceed %d tokens"
+                        % (batch_size_multiple, batch_size)
+                        )
                 else:
                     yield minibatch[:-overflowed]
                     minibatch = minibatch[-overflowed:]
@@ -756,15 +840,21 @@ class MultipleDatasetIterator(object):
                  opt):
         self.index = -1
         self.iterables = []
-        for shard in train_shards:
-            self.iterables.append(
-                build_dataset_iter(shard, fields, opt, multi=True))
+        self.weights = []
+        for shard, weight in zip(train_shards, opt.data_weights):
+            if weight > 0:
+                self.iterables.append(
+                    build_dataset_iter(shard, fields, opt, multi=True))
+                self.weights.append(weight)
         self.init_iterators = True
-        self.weights = opt.data_weights
+        # self.weights = opt.data_weights
         self.batch_size = opt.batch_size
         self.batch_size_fn = max_tok_len \
             if opt.batch_type == "tokens" else None
-        self.batch_size_multiple = 8 if opt.model_dtype == "fp16" else 1
+        if opt.batch_size_multiple is not None:
+            self.batch_size_multiple = opt.batch_size_multiple
+        else:
+            self.batch_size_multiple = 8 if opt.model_dtype == "fp16" else 1
         self.device = device
         # Temporarily load one shard to retrieve sort_key for data_type
         temp_dataset = torch.load(self.iterables[0]._paths[0])
@@ -910,11 +1000,14 @@ def build_dataset_iter(corpus_type, fields, opt, is_train=True, multi=False):
     to iterate over. We implement simple ordered iterator strategy here,
     but more sophisticated strategy like curriculum learning is ok too.
     """
+    dataset_glob = opt.data + '.' + corpus_type + '.[0-9]*.pt'
     dataset_paths = list(sorted(
-        glob.glob(opt.data + '.' + corpus_type + '.[0-9]*.pt')))
+        glob.glob(dataset_glob),
+        key=lambda p: int(p.split(".")[-2])))
+
     if not dataset_paths:
         if is_train:
-            raise ValueError('Training data %s not found' % opt.data)
+            raise ValueError('Training data %s not found' % dataset_glob)
         else:
             return None
     if multi:
@@ -927,7 +1020,7 @@ def build_dataset_iter(corpus_type, fields, opt, is_train=True, multi=False):
             if is_train and opt.batch_type == "tokens" else None
         batch_size_multiple = 8 if opt.model_dtype == "fp16" else 1
 
-    device = "cuda" if opt.gpu_ranks else "cpu"
+    device = "cpu"
 
     return DatasetLazyIter(
         dataset_paths,
@@ -945,4 +1038,4 @@ def build_dataset_iter(corpus_type, fields, opt, is_train=True, multi=False):
 
 def build_dataset_iter_multiple(train_shards, fields, opt):
     return MultipleDatasetIterator(
-        train_shards, fields, "cuda" if opt.gpu_ranks else "cpu", opt)
+        train_shards, fields, "cpu", opt)

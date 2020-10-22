@@ -8,6 +8,7 @@ import random
 import numpy as np
 import inspect
 from itertools import islice, repeat
+import os
 
 
 def split_corpus(path, shard_size, default=None):
@@ -158,6 +159,23 @@ def report_matrix(row_label, column_label, matrix):
         row_format = "{:>10.10} " + "{:>10.7f} " * len(row_label)
     return output
 
+def check_model_config(model_config, root):
+    # we need to check the model path + any tokenizer path
+    for model in model_config["models"]:
+        model_path = os.path.join(root, model)
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(
+                "{} from model {} does not exist".format(
+                    model_path, model_config["id"]))
+    if "tokenizer" in model_config.keys():
+        if "params" in model_config["tokenizer"].keys():
+            for k, v in model_config["tokenizer"]["params"].items():
+                if k.endswith("path"):
+                    tok_path = os.path.join(root, v)
+                    if not os.path.exists(tok_path):
+                        raise FileNotFoundError(
+                            "{} from model {} does not exist".format(
+                                tok_path, model_config["id"]))
 
 def draw(data, x, y, ax):
     seaborn.heatmap(data,
