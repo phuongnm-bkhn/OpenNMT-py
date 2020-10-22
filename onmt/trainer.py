@@ -390,17 +390,11 @@ class Trainer(object):
                 if self.accum_count == 1:
                     self.optim.zero_grad()
 
-<<<<<<< HEAD
-                outputs, attns, enc_hiddens = self.model(src, tgt, src_lengths, bptt=bptt,
-                                                         with_align=self.with_align)
-                bptt = True
-=======
                 with torch.cuda.amp.autocast(enabled=self.optim.amp):
-                    outputs, attns = self.model(
+                    outputs, attns, enc_hiddens = self.model(
                         src, tgt, src_lengths, bptt=bptt,
                         with_align=self.with_align)
                     bptt = True
->>>>>>> 60125c80
 
                     # 3. Compute loss.
                     loss, batch_stats = self.train_loss(
