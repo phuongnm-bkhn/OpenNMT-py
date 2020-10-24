@@ -6,8 +6,8 @@ import copy
 import logging
 import matplotlib.pyplot as plt
 import os
-import math
 import time
+import numpy as np
 from itertools import count, zip_longest
 
 import torch
@@ -94,10 +94,9 @@ class Translator(object):
         ignore_when_blocking (set or frozenset): See
             :class:`onmt.translate.decode_strategy.DecodeStrategy`.
         replace_unk (bool): Replace unknown token.
+        tgt_prefix (bool): Force the predictions begin with provided -tgt.
         data_type (str): Source data type.
         verbose (bool): Print/log every translation.
-        report_bleu (bool): Print/log Bleu metric.
-        report_rouge (bool): Print/log Rouge metric.
         report_time (bool): Print/log total time/frequency.
         copy_attn (bool): Use copy attention.
         global_scorer (onmt.translate.GNMTGlobalScorer): Translation
@@ -127,11 +126,10 @@ class Translator(object):
             block_ngram_repeat=0,
             ignore_when_blocking=frozenset(),
             replace_unk=False,
+            tgt_prefix=False,
             phrase_table="",
             data_type="text",
             verbose=False,
-            report_bleu=False,
-            report_rouge=False,
             report_time=False,
             copy_attn=False,
             global_scorer=None,
@@ -177,11 +175,10 @@ class Translator(object):
         if self.replace_unk and not self.model.decoder.attentional:
             raise ValueError(
                 "replace_unk requires an attentional decoder.")
+        self.tgt_prefix = tgt_prefix
         self.phrase_table = phrase_table
         self.data_type = data_type
         self.verbose = verbose
-        self.report_bleu = report_bleu
-        self.report_rouge = report_rouge
         self.report_time = report_time
 
         self.copy_attn = copy_attn
@@ -270,11 +267,10 @@ class Translator(object):
             block_ngram_repeat=opt.block_ngram_repeat,
             ignore_when_blocking=set(opt.ignore_when_blocking),
             replace_unk=opt.replace_unk,
+            tgt_prefix=opt.tgt_prefix,
             phrase_table=opt.phrase_table,
             data_type=opt.data_type,
             verbose=opt.verbose,
-            report_bleu=opt.report_bleu,
-            report_rouge=opt.report_rouge,
             report_time=opt.report_time,
             copy_attn=model_opt.copy_attn,
             global_scorer=global_scorer,
@@ -364,12 +360,18 @@ class Translator(object):
         if batch_size is None:
             raise ValueError("batch_size must be set")
 
+        if self.tgt_prefix and tgt is None:
+            raise ValueError('Prefix should be feed to tgt if -tgt_prefix.')
+
         src_data = {"reader": self.src_reader, "data": src, "dir": src_dir}
         tgt_data = {"reader": self.tgt_reader, "data": tgt, "dir": None}
         constituent_tree_data = {"reader": self.constituent_tree_reader, "data": constituent_tree, "dir": None}
         _readers, _data, _dir = inputters.Dataset.config(
             [('src', src_data), ('tgt', tgt_data), ('constituent_tree', constituent_tree_data)])
 
+        # corpus_id field is useless here
+        if self.fields.get("corpus_id", None) is not None:
+            self.fields.pop('corpus_id')
         data = inputters.Dataset(
             self.fields, readers=_readers, data=_data, dirs=_dir,
             sort_key=inputters.str2sortkey[self.data_type],
@@ -495,10 +497,7 @@ class Translator(object):
                                       sent_number=sent_number)
 
                 if align_debug:
-                    if trans.gold_sent is not None:
-                        tgts = trans.gold_sent
-                    else:
-                        tgts = trans.pred_sents[0]
+                    tgts = trans.pred_sents[0]
                     align = trans.word_aligns[0].tolist()
                     if self.data_type == 'text':
                         srcs = trans.src_raw
@@ -520,12 +519,6 @@ class Translator(object):
                 msg = self._report_score('GOLD', gold_score_total,
                                          gold_words_total)
                 self._log(msg)
-                if self.report_bleu:
-                    msg = self._report_bleu(tgt)
-                    self._log(msg)
-                if self.report_rouge:
-                    msg = self._report_rouge(tgt)
-                    self._log(msg)
 
         if self.report_time:
             total_time = end_time - start_time
@@ -574,11 +567,8 @@ class Translator(object):
         alignment src indice Tensor in size ``(batch, n_best,)``.
         """
         # (0) add BOS and padding to tgt prediction
-        if hasattr(batch, 'tgt'):
-            batch_tgt_idxs = batch.tgt.transpose(1, 2).transpose(0, 2)
-        else:
-            batch_tgt_idxs = self._align_pad_prediction(
-                predictions, bos=self._tgt_bos_idx, pad=self._tgt_pad_idx)
+        batch_tgt_idxs = self._align_pad_prediction(
+            predictions, bos=self._tgt_bos_idx, pad=self._tgt_pad_idx)
         tgt_mask = (batch_tgt_idxs.eq(self._tgt_pad_idx) |
                     batch_tgt_idxs.eq(self._tgt_eos_idx) |
                     batch_tgt_idxs.eq(self._tgt_bos_idx))
@@ -808,8 +798,10 @@ class Translator(object):
 
         # (2) prep decode_strategy. Possibly repeat src objects.
         src_map = batch.src_map if use_src_map else None
+        target_prefix = batch.tgt if self.tgt_prefix else None
         fn_map_state, memory_bank, memory_lengths, src_map = \
-            decode_strategy.initialize(memory_bank, src_lengths, src_map)
+            decode_strategy.initialize(memory_bank, src_lengths, src_map,
+                                       target_prefix=target_prefix)
         if fn_map_state is not None:
             self.model.decoder.map_state(fn_map_state)
 
@@ -908,31 +900,9 @@ class Translator(object):
         if words_total == 0:
             msg = "%s No words predicted" % (name,)
         else:
+            avg_score = score_total / words_total
+            ppl = np.exp(-score_total.item() / words_total)
             msg = ("%s AVG SCORE: %.4f, %s PPL: %.4f" % (
-                name, score_total / words_total,
-                name, math.exp(-score_total / words_total)))
-        return msg
-
-    def _report_bleu(self, tgt_path):
-        import subprocess
-        base_dir = os.path.abspath(__file__ + "/../../..")
-        # Rollback pointer to the beginning.
-        self.out_file.seek(0)
-        print()
-
-        res = subprocess.check_output(
-            "perl %s/tools/multi-bleu.perl %s" % (base_dir, tgt_path),
-            stdin=self.out_file, shell=True
-        ).decode("utf-8")
-
-        msg = ">> " + res.strip()
-        return msg
-
-    def _report_rouge(self, tgt_path):
-        import subprocess
-        path = os.path.split(os.path.realpath(__file__))[0]
-        msg = subprocess.check_output(
-            "python %s/tools/test_rouge.py -r %s -c STDIN" % (path, tgt_path),
-            shell=True, stdin=self.out_file
-        ).decode("utf-8").strip()
+                name, avg_score,
+                name, ppl))
         return msg

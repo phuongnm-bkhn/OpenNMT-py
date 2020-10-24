@@ -34,7 +34,7 @@ class NgramLSTM(nn.Module):
 
         self.rnn = nn.LSTM(self.input_size,
                            self.hidden_size,
-                           batch_first=True,
+                           batch_first=False,
                            num_layers=self._num_layers,
                            bidirectional=True)
 
@@ -67,7 +67,7 @@ class NgramLSTM(nn.Module):
         # n-gram in NLP, and combined all set of n-gram treat to LSTM as a batch of input
         zz = data_input.reshape([n_gram,
                                  batch_size * seq_length,
-                                 hidden_size]).transpose(0,1)
+                                 hidden_size])
 
         # forward data using Bi-LSTM
         # we just get the cell state (num_layers * num_directions, batch, hidden_size)
@@ -125,7 +125,7 @@ class MultiHeadedAttention(nn.Module):
     """
 
     def __init__(self, head_count, model_dim, dropout=0.1,
-                 max_relative_positions=0, use_ngram_features=False):
+                 max_relative_positions=0, gram_sizes=None):
         assert model_dim % head_count == 0
         self.dim_per_head = model_dim // head_count
         self.model_dim = model_dim
@@ -145,11 +145,13 @@ class MultiHeadedAttention(nn.Module):
 
         self.max_relative_positions = max_relative_positions
 
-        self.use_ngram_features = use_ngram_features
-        if self.use_ngram_features:
-            self.n_gram4_features = NgramLSTM(4, self.dim_per_head) # NgramCombined(4)
-            self.n_gram3_features = NgramLSTM(3, self.dim_per_head) # NgramCombined(3)
-            self.n_gram2_features = NgramLSTM(2, self.dim_per_head) # NgramCombined(2)
+        self.n_gram_features = None
+        if gram_sizes is not None and len(gram_sizes) == head_count:
+            ngram_size_info = dict([("{}_gram_features".format(gram_size), NgramLSTM(gram_size, self.dim_per_head))
+                                    for gram_size in set(gram_sizes) if gram_size > 0])
+            self.n_gram_features = nn.ModuleDict(ngram_size_info)
+            self.n_gram_features_count = dict([(gram_size, len([_x for _x in gram_sizes if _x == gram_size]))
+                                               for gram_size in set(gram_sizes)])
 
         if max_relative_positions > 0:
             vocab_size = max_relative_positions * 2 + 1
@@ -263,45 +265,29 @@ class MultiHeadedAttention(nn.Module):
         query = shape(query)
 
         # ngram feature for q, k, v
-        if self.use_ngram_features:
+        if self.n_gram_features is not None:
             if mask is not None:
                 mask_qkv = mask.unsqueeze(-1)  # [B, 1, seq_len, 1]
                 query = query.masked_fill(mask_qkv, 0)
                 key = key.masked_fill(mask_qkv, 0)
                 value = value.masked_fill(mask_qkv, 0)
 
-            if head_count > 3:
-                _xx = torch.cat([ query[:, 2:4, :, :].reshape(-1, query_len, dim_per_head),
-                        key[:, 2:4, :, :].reshape(-1, query_len, dim_per_head),
-                        value[:, 2:4, :, :].reshape(-1, query_len, dim_per_head)
-                       ], dim=0).reshape(-1, query_len, dim_per_head)
-                _yy = self.n_gram2_features(_xx).reshape(3, -1, query_len, dim_per_head)
-                _q, _k, _v = _yy[0], _yy[1], _yy[2]
-                query[:, 2:4, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
-                key[:, 2:4, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
-                value[:, 2:4, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
-
-            if head_count > 5:
-                _xx = torch.cat([ query[:, 4:6, :, :].reshape(-1, query_len, dim_per_head),
-                                  key[:, 4:6, :, :].reshape(-1, query_len, dim_per_head),
-                                  value[:, 4:6, :, :].reshape(-1, query_len, dim_per_head)
+            idx_head_layer = 0
+            for gram_size, count_h_using in self.n_gram_features_count.items():
+                if gram_size == 0:
+                    idx_head_layer += count_h_using
+                    continue
+                ngram_features_extractor = self.n_gram_features["{}_gram_features".format(gram_size)]
+                _xx = torch.cat([ query[:, idx_head_layer:idx_head_layer+count_h_using, :, :].reshape(-1, query_len, dim_per_head),
+                                  key[:, idx_head_layer:idx_head_layer+count_h_using, :, :].reshape(-1, query_len, dim_per_head),
+                                  value[:, idx_head_layer:idx_head_layer+count_h_using, :, :].reshape(-1, query_len, dim_per_head)
                                   ], dim=0).reshape(-1, query_len, dim_per_head)
-                _yy = self.n_gram3_features(_xx).reshape(3, -1, query_len, dim_per_head)
+                _yy = ngram_features_extractor(_xx).reshape(3, -1, query_len, dim_per_head)
                 _q, _k, _v = _yy[0], _yy[1], _yy[2]
-                query[:, 4:6, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
-                key[:, 4:6, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
-                value[:, 4:6, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
-
-            if head_count > 7:
-                _xx = torch.cat([ query[:, 6:8, :, :].reshape(-1, query_len, dim_per_head),
-                                  key[:, 6:8, :, :].reshape(-1, query_len, dim_per_head),
-                                  value[:, 6:8, :, :].reshape(-1, query_len, dim_per_head)
-                                  ], dim=0).reshape(-1, query_len, dim_per_head)
-                _yy = self.n_gram4_features(_xx).reshape(3, -1, query_len, dim_per_head)
-                _q, _k, _v = _yy[0], _yy[1], _yy[2]
-                query[:, 6:8, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
-                key[:, 6:8, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
-                value[:, 6:8, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
+                query[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
+                key[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
+                value[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
+                idx_head_layer += count_h_using
 
         key_len = key.size(2)
         query_len = query.size(2)

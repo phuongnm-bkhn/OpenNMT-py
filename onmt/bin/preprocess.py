@@ -15,7 +15,9 @@ import onmt.inputters as inputters
 import onmt.opts as opts
 from onmt.utils.parse import ArgumentParser
 from onmt.inputters.inputter import _build_fields_vocab,\
-                                    _load_vocab
+                                    _load_vocab, \
+                                    old_style_vocab, \
+                                    load_old_vocab
 
 from functools import partial
 from multiprocessing import Pool
@@ -62,14 +64,18 @@ def process_one_shard(corpus_params, params):
     dataset = inputters.Dataset(
         fields, readers=_readers, data=_data, dirs=_dir,
         sort_key=inputters.str2sortkey[opt.data_type],
-        filter_pred=filter_pred, marking_condition=opt.marking_condition,
+        filter_pred=filter_pred, 
+        corpus_id=maybe_id, 
+        marking_condition=opt.marking_condition,
         existing_fields=existing_fields,
         marking_word_frequency_limit=opt.marking_word_frequency_limit
     )
     if corpus_type == "train" and existing_fields is None:
         for ex in dataset.examples:
+            sub_sub_counter['corpus_id'].update(
+                ["train" if maybe_id is None else maybe_id])
             for name, field in fields.items():
-                if ((opt.data_type == "audio") and (name == "src")):
+                if (opt.data_type in ["audio", "vec"]) and name == "src":
                     continue
                 try:
                     f_iter = iter(field)
@@ -214,14 +220,27 @@ def build_save_dataset(corpus_type, fields, src_reader, constituent_tree_reader,
 
     if corpus_type == "train":
         vocab_path = opt.save_data + '.vocab.pt'
+        new_fields = _build_fields_vocab(
+            fields, counters, opt.data_type,
+            opt.share_vocab, opt.vocab_size_multiple,
+            opt.src_vocab_size, opt.src_words_min_frequency,
+            opt.tgt_vocab_size, opt.tgt_words_min_frequency,
+            subword_prefix=opt.subword_prefix,
+            subword_prefix_is_joiner=opt.subword_prefix_is_joiner)
         if existing_fields is None:
-            fields = _build_fields_vocab(
-                fields, counters, opt.data_type,
-                opt.share_vocab, opt.vocab_size_multiple,
-                opt.src_vocab_size, opt.src_words_min_frequency,
-                opt.tgt_vocab_size, opt.tgt_words_min_frequency)
+            fields = new_fields
         else:
             fields = existing_fields
+
+        if old_style_vocab(fields):
+            fields = load_old_vocab(
+                fields, opt.data_type, dynamic_dict=opt.dynamic_dict)
+
+        # patch corpus_id
+        if fields.get("corpus_id", False):
+            fields["corpus_id"].vocab = new_fields["corpus_id"].vocab_cls(
+                counters["corpus_id"])
+
         torch.save(fields, vocab_path)
 
 
@@ -257,10 +276,17 @@ def preprocess(opt):
 
     src_nfeats = 0
     tgt_nfeats = 0
-    for src, tgt in zip(opt.train_src, opt.train_tgt):
-        src_nfeats += count_features(src) if opt.data_type == 'text' \
-            else 0
-        tgt_nfeats += count_features(tgt)  # tgt always text so far
+    src_nfeats = count_features(opt.train_src[0]) if opt.data_type == 'text' \
+        else 0
+    tgt_nfeats = count_features(opt.train_tgt[0])  # tgt always text so far
+    if len(opt.train_src) > 1 and opt.data_type == 'text':
+        for src, tgt in zip(opt.train_src[1:], opt.train_tgt[1:]):
+            assert src_nfeats == count_features(src),\
+                "%s seems to mismatch features of "\
+                "the other source datasets" % src
+            assert tgt_nfeats == count_features(tgt),\
+                "%s seems to mismatch features of "\
+                "the other target datasets" % tgt
     logger.info(" * number of source features: %d." % src_nfeats)
     logger.info(" * number of target features: %d." % tgt_nfeats)
 
