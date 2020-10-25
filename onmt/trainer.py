@@ -343,7 +343,7 @@ class Trainer(object):
                     # F-prop through the model.
                     outputs, attns, enc_hiddens = valid_model(src, tgt, src_lengths,
                                                               with_align=self.with_align, 
-                                                              **{"encoder": {"constituent_tree": batch.constituent_tree}})
+                                                              **{"encoder": {"soft_tgt_templ": batch.soft_tgt_templ}})
 
                     # Compute loss.
                     _, batch_stats = self.valid_loss(batch, outputs, attns, enc_hiddens=enc_hiddens)
@@ -395,7 +395,7 @@ class Trainer(object):
                     outputs, attns, enc_hiddens = self.model(
                         src, tgt, src_lengths, bptt=bptt,
                         with_align=self.with_align,
-                        **{"encoder": {"constituent_tree": batch.constituent_tree}})
+                        **{"encoder": {"soft_tgt_templ": batch.soft_tgt_templ}})
                     bptt = True
 
                     # 3. Compute loss.

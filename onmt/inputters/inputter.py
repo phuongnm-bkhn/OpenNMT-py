@@ -112,7 +112,8 @@ def get_fields(
     src_truncate=None,
     tgt_truncate=None,
     marking_mechanism=False,
-    use_constituent_tree=False
+    use_constituent_tree=False,
+    use_soft_tgt_templ=False,
 ):
     """
     Args:
@@ -182,6 +183,13 @@ def get_fields(
                                          "truncate": None,
                                          "base_name": "constituent_tree"}
         fields["constituent_tree"] = fields_getters["structure_text"](**constituent_tree_field_kwargs)
+
+    if use_soft_tgt_templ:
+        fields["soft_tgt_templ"] = fields_getters["text"](**{"n_feats": 0,
+                                                             "include_lengths": True,
+                                                             "pad": pad, "bos": None, "eos": None,
+                                                             "truncate": src_truncate,
+                                                             "base_name": "soft_tgt_templ"})
 
     indices = Field(use_vocab=False, dtype=torch.long, sequential=False)
     fields["indices"] = indices
@@ -439,6 +447,9 @@ def _build_fields_vocab(fields, counters, data_type, share_vocab,
     if "constituent_tree" in fields:
         build_fv_args["constituent_tree"] = dict(
             max_size=100000, min_freq=0)
+    if "soft_tgt_templ" in fields:
+        build_fv_args["soft_tgt_templ"] = dict(
+            max_size=src_vocab_size, min_freq=src_words_min_frequency)
     build_fv_args["tgt"] = dict(
         max_size=tgt_vocab_size, min_freq=tgt_words_min_frequency)
     tgt_multifield = fields["tgt"]
@@ -463,6 +474,13 @@ def _build_fields_vocab(fields, counters, data_type, share_vocab,
             constituent_tree_multifield = fields["constituent_tree"]
             _build_fv_from_multifield(
                 constituent_tree_multifield,
+                counters,
+                build_fv_args,
+                size_multiple=1)
+        if "soft_tgt_templ" in fields:
+            soft_tgt_templ_multifield = fields["soft_tgt_templ"]
+            _build_fv_from_multifield(
+                soft_tgt_templ_multifield,
                 counters,
                 build_fv_args,
                 size_multiple=1)

@@ -64,10 +64,29 @@ class NMTModel(nn.Module):
                         layer.encoder_state = {}
                         enc_final_states.append(enc_final_state)
                     enc_state = tuple(enc_final_states)
-            self.decoder.init_state(src, memory_bank, enc_state)
-        dec_out, attns = self.decoder(dec_in, memory_bank,
-                                      memory_lengths=lengths,
-                                      with_align=with_align)
+            if "TransformerMultiEncoder" not in str(type(self.encoder)):
+                self.decoder.init_state(src, memory_bank, enc_state)
+
+        if "TransformerMultiEncoder" in str(type(self.encoder)):
+            if bptt is False:
+                self.decoder.init_state(src, memory_bank[0], enc_state[0])
+            src_dec_out, src_attns = self.decoder(dec_in, memory_bank[0],
+                                                  memory_lengths=lengths[0],
+                                                  with_align=with_align)
+
+            soft_tgt_templ, lengths_soft_tgt_templ = kwargs.get("encoder", {}).get("soft_tgt_templ")
+            if bptt is False:
+                self.decoder.init_state(soft_tgt_templ, memory_bank[1], enc_state[1])
+            soft_tgt_templ_dec_out, soft_tgt_templ_attns = self.decoder(dec_in, memory_bank[1],
+                                                                        memory_lengths=lengths_soft_tgt_templ,
+                                                                        with_align=with_align)
+
+            dec_out = src_dec_out * 0.5 + soft_tgt_templ_dec_out * 0.5
+            attns = src_attns
+        else:
+            dec_out, attns = self.decoder(dec_in, memory_bank,
+                                          memory_lengths=lengths,
+                                          with_align=with_align)
         return dec_out, attns, memory_bank
 
     def update_dropout(self, dropout):

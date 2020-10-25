@@ -65,7 +65,7 @@ def build_embeddings(opt, text_field, for_encoder=True):
     return emb
 
 
-def build_encoder(opt, embeddings, src_constituent_tree_emb=None):
+def build_encoder(opt, embeddings, **kwargs):
     """
     Various encoder dispatcher function.
     Args:
@@ -74,7 +74,7 @@ def build_encoder(opt, embeddings, src_constituent_tree_emb=None):
     """
     enc_type = opt.encoder_type if opt.model_type == "text" \
         or opt.model_type == "vec" else opt.model_type
-    return str2enc[enc_type].from_opt(opt, embeddings, src_constituent_tree_emb)
+    return str2enc[enc_type].from_opt(opt, embeddings, **kwargs)
 
 
 def build_decoder(opt, embeddings):
@@ -140,17 +140,21 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
         model_opt.attention_dropout = model_opt.dropout
 
     # Build embeddings.
+    encoder_kwargs = {}
     if model_opt.model_type == "text" or model_opt.model_type == "vec":
         src_field = fields["src"]
         src_emb = build_embeddings(model_opt, src_field)
-        src_constituent_tree_emb = ConstituentTreeEncoder(fields["constituent_tree"].base_field,
-                                                          embedding_dim=model_opt.enc_rnn_size,
-                                                          hidden_size=model_opt.enc_rnn_size)
+        if "soft_tgt_templ" in fields:
+            encoder_kwargs["soft_tgt_templ_emb"] = build_embeddings(model_opt, src_field)
+        if "constituent_tree" in fields:
+            encoder_kwargs["src_constituent_tree_emb"] = ConstituentTreeEncoder(fields["constituent_tree"].base_field,
+                                                              embedding_dim=model_opt.enc_rnn_size,
+                                                              hidden_size=model_opt.enc_rnn_size)
     else:
         src_emb = None
 
     # Build encoder.
-    encoder = build_encoder(model_opt, src_emb, src_constituent_tree_emb)
+    encoder = build_encoder(model_opt, src_emb, **encoder_kwargs)
 
     # Build decoder.
     tgt_field = fields["tgt"]

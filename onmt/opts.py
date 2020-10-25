@@ -73,16 +73,17 @@ def model_opts(parser):
               help='Data type of the model.')
 
     group.add('--encoder_type', '-encoder_type', type=str, default='rnn',
-              choices=['rnn', 'brnn', 'ggnn', 'mean', 'transformer', 'cnn', 'transformer-rnn', 'rnn-selfattn'],
+              choices=['rnn', 'brnn', 'ggnn', 'mean', 'transformer', 'cnn', 'transformer-rnn', 'rnn-selfattn',
+                       "transformer-multi-encoder"],
               help="Type of encoder layer to use. Non-RNN layers "
                    "are experimental. Options are "
-                   "[rnn|brnn|ggnn|mean|transformer|cnn|transformer-rnn|rnn-selfattn].")
+                   "[rnn|brnn|ggnn|mean|transformer|cnn|transformer-rnn|rnn-selfattn|transformer-multi-encoder].")
 
     group.add('--decoder_type', '-decoder_type', type=str, default='rnn',
-              choices=['rnn', 'transformer', 'cnn', 'transformer-rnn',],
+              choices=['rnn', 'transformer', 'cnn', 'transformer-rnn', "transformer-multi-sources-decoder"],
               help="Type of decoder layer to use. Non-RNN layers "
                    "are experimental. Options are "
-                   "[rnn|transformer|transformer-rnn|cnn].")
+                   "[rnn|transformer|transformer-rnn|cnn|transformer-multi-sources-decoder].")
 
     group.add('--layers', '-layers', type=int, default=-1,
               help='Number of layers in enc/dec.')
@@ -291,7 +292,15 @@ def preprocess_opts(parser):
               help="Path of train constituent tree.")
     group.add('--valid_constituent_tree', '-valid_constituent_tree', required=False, default=None,
               help="Path of valid constituent tree.")
+    group.add('--use_constituent_tree', '-use_constituent_tree', action="store_true", default=False,
+              help="use constituent tree information or not.")
 
+    group.add('--train_templ', '-train_templ', required=False,  nargs='+', default=[None],
+              help="Path of train soft target template.")
+    group.add('--valid_templ', '-valid_templ', required=False, default=None,
+              help="Path of valid soft target template.")
+    group.add('--use_soft_tgt_templ', '-use_soft_tgt_templ', action="store_true", default=False,
+              help="use soft target template information or not.")
 
     # Dictionary options, for text corpus
 
