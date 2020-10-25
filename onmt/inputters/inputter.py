@@ -256,7 +256,7 @@ class IterOnDevice(object):
 
             if hasattr(batch, 'soft_tgt_templ'):
                 if isinstance(batch.soft_tgt_templ, tuple):
-                    tuple([_.to(device) for _ in batch.soft_tgt_templ])
+                    batch.soft_tgt_templ = tuple([_.to(device) for _ in batch.soft_tgt_templ])
                 else:
                     batch.soft_tgt_templ = batch.soft_tgt_templ.to(device)
 
