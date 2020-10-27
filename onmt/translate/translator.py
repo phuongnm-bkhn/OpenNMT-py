@@ -112,7 +112,6 @@ class Translator(object):
             fields,
             src_reader,
             tgt_reader,
-            constituent_tree_reader,
             gpu=-1,
             n_best=1,
             min_length=0,
@@ -137,7 +136,8 @@ class Translator(object):
             report_align=False,
             report_score=True,
             logger=None,
-            seed=-1):
+            seed=-1,
+            **translate_kwargs):
         self.model = model
         self.fields = fields
         tgt_field = dict(self.fields)["tgt"].base_field
@@ -169,7 +169,7 @@ class Translator(object):
         self._exclusion_idxs = {
             self._tgt_vocab.stoi[t] for t in self.ignore_when_blocking}
         self.src_reader = src_reader
-        self.constituent_tree_reader = constituent_tree_reader
+        self.readers = translate_kwargs.get("readers", {})
         self.tgt_reader = tgt_reader
         self.replace_unk = replace_unk
         if self.replace_unk and not self.model.decoder.attentional:
@@ -248,12 +248,12 @@ class Translator(object):
         src_reader = inputters.str2reader[opt.data_type].from_opt(opt)
         tgt_reader = inputters.str2reader["text"].from_opt(opt)
         constituent_tree_reader = inputters.str2reader["text"].from_opt(opt)
+        soft_templ_reader = inputters.str2reader["text"].from_opt(opt)
         return cls(
             model,
             fields,
             src_reader,
             tgt_reader,
-            constituent_tree_reader=constituent_tree_reader,
             gpu=opt.gpu,
             n_best=opt.n_best,
             min_length=opt.min_length,
@@ -278,7 +278,9 @@ class Translator(object):
             report_align=report_align,
             report_score=report_score,
             logger=logger,
-            seed=opt.seed)
+            seed=opt.seed,
+            **{'readers': {'constituent_tree_reader': constituent_tree_reader,
+                           'soft_templ_reader': soft_templ_reader, }})
 
     def _log(self, msg):
         if self.logger:
@@ -327,7 +329,6 @@ class Translator(object):
             self,
             src,
             tgt=None,
-            constituent_tree=None,
             src_dir=None,
             batch_size=None,
             batch_type="sents",
@@ -336,7 +337,8 @@ class Translator(object):
             phrase_table="",
             self_attn_debug=False,
             self_attn_folder_save="./",
-            marking_condition=None):
+            marking_condition=None,
+            **kwargs):
         """Translate content of ``src`` and get gold scores from ``tgt``.
 
         Args:
@@ -365,9 +367,11 @@ class Translator(object):
 
         src_data = {"reader": self.src_reader, "data": src, "dir": src_dir}
         tgt_data = {"reader": self.tgt_reader, "data": tgt, "dir": None}
-        constituent_tree_data = {"reader": self.constituent_tree_reader, "data": constituent_tree, "dir": None}
+        other_info = [("soft_tgt_templ", {"reader": self.readers.get("soft_templ_reader"),
+                                      "data": kwargs.get('soft_tgt_templ'),
+                                      "dir": None})]
         _readers, _data, _dir = inputters.Dataset.config(
-            [('src', src_data), ('tgt', tgt_data), ('constituent_tree', constituent_tree_data)])
+            [('src', src_data), ('tgt', tgt_data)] + other_info)
 
         # corpus_id field is useless here
         if self.fields.get("corpus_id", None) is not None:
@@ -645,7 +649,9 @@ class Translator(object):
 
         enc_states, memory_bank, src_lengths = self.model.encoder(
             src, src_lengths,
-            **{"constituent_tree": batch.constituent_tree})
+            **{"constituent_tree": batch.constituent_tree if hasattr(batch, "constituent_tree") else None,
+               "soft_tgt_templ": batch.soft_tgt_templ if hasattr(batch, "soft_tgt_templ") else None,
+               })
         if src_lengths is None:
             assert not isinstance(memory_bank, tuple), \
                 'Ensemble decoding only supported for text data'
@@ -653,7 +659,7 @@ class Translator(object):
                 .type_as(memory_bank) \
                 .long() \
                 .fill_(memory_bank.size(0))
-        return src, enc_states, memory_bank, src_lengths
+        return torch.cat((src, batch.soft_tgt_templ[0]), dim=0), enc_states, memory_bank, src_lengths
 
     def _decode_and_generate(
             self,

@@ -702,6 +702,9 @@ def translate_opts(parser):
               help="Report some translation time metrics")
     group.add('--constituent_tree', '-constituent_tree', required=False, default=None,
               help="Path of test constituent tree.")
+    group.add('--soft_templ', '-soft_templ', required=False,
+              help="Soft target template to decode (one line per "
+                   "sequence)")
 
     # Options most relevant to summarization.
     group.add('--dynamic_dict', '-dynamic_dict', action='store_true',

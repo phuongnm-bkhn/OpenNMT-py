@@ -18,24 +18,44 @@ def translate(opt):
     translator = build_translator(opt, logger=logger, report_score=True)
     src_shards = split_corpus(opt.src, opt.shard_size)
     tgt_shards = split_corpus(opt.tgt, opt.shard_size)
-    constituent_tree_shards = split_corpus(opt.constituent_tree, opt.shard_size)
-    shard_pairs = zip(src_shards, tgt_shards, constituent_tree_shards)
 
-    for i, (src_shard, tgt_shard, constituent_tree_shard) in enumerate(shard_pairs):
-        logger.info("Translating shard %d." % i)
-        translator.translate(
-            src=src_shard,
-            tgt=tgt_shard,
-            constituent_tree=constituent_tree_shard,
-            src_dir=opt.src_dir,
-            batch_size=opt.batch_size,
-            batch_type=opt.batch_type,
-            attn_debug=opt.attn_debug,
-            align_debug=opt.align_debug,
-            marking_condition=opt.marking_condition,
-            self_attn_debug=opt.self_attn_debug,
-            self_attn_folder_save="/".join(opt.src.split("/")[:-1])
-        )
+    if hasattr(opt, "soft_templ"):
+        soft_templ_shards = split_corpus(opt.soft_templ, opt.shard_size)
+        shard_pairs = zip(src_shards, tgt_shards, soft_templ_shards)
+        translate_kwargs = {}
+        for i, (src_shard, tgt_shard, soft_templ_shard) in enumerate(shard_pairs):
+            translate_kwargs["soft_tgt_templ"] = soft_templ_shard
+            logger.info("Translating shard %d." % i)
+            translator.translate(
+                src=src_shard,
+                tgt=tgt_shard,
+                src_dir=opt.src_dir,
+                batch_size=opt.batch_size,
+                batch_type=opt.batch_type,
+                attn_debug=opt.attn_debug,
+                align_debug=opt.align_debug,
+                marking_condition=opt.marking_condition,
+                self_attn_debug=opt.self_attn_debug,
+                self_attn_folder_save="/".join(opt.src.split("/")[:-1]),
+                **translate_kwargs
+            )
+    else:
+        shard_pairs = zip(src_shards, tgt_shards)
+
+        for i, (src_shard, tgt_shard) in enumerate(shard_pairs):
+            logger.info("Translating shard %d." % i)
+            translator.translate(
+                src=src_shard,
+                tgt=tgt_shard,
+                src_dir=opt.src_dir,
+                batch_size=opt.batch_size,
+                batch_type=opt.batch_type,
+                attn_debug=opt.attn_debug,
+                align_debug=opt.align_debug,
+                marking_condition=opt.marking_condition,
+                self_attn_debug=opt.self_attn_debug,
+                self_attn_folder_save="/".join(opt.src.split("/")[:-1])
+            )
 
 
 def _get_parser():
