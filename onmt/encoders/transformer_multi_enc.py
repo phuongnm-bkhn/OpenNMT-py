@@ -163,19 +163,10 @@ class TransformerMultiEncoder(EncoderBase):
                                                            self.layer_norm_soft_tgt_templ,
                                                            lengths=lengths_soft_tgt_templ)
 
-        # torch.index_select(y, 0, torch.LongTensor([0, 1]), out=x[1:3])
         out_src, out_soft_tgt_templ = out_src.transpose(0, 1).contiguous(), \
                                       out_soft_tgt_templ.transpose(0, 1).contiguous()
-        out_combined = torch.cat((out_src, out_soft_tgt_templ), dim=0)
-        emb_combined = torch.cat((emb, soft_tgt_templ_emb), dim=0)
-        batch_size = emb.size(1)
-        for i in range(batch_size):
-            len_src = lengths[i]
-            len_templ = lengths_soft_tgt_templ[i]
-            out_combined[len_src: len_src + len_templ, i, :] = out_soft_tgt_templ[:len_templ, i, :]
-            emb_combined[len_src: len_src + len_templ, i, :] = soft_tgt_templ_emb[:len_templ, i, :]
 
-        return emb_combined, out_combined, lengths + lengths_soft_tgt_templ
+        return (emb, soft_tgt_templ_emb), (out_src, out_soft_tgt_templ), (lengths, lengths_soft_tgt_templ)
 
     def update_dropout(self, dropout, attention_dropout):
         self.embeddings.update_dropout(dropout)
