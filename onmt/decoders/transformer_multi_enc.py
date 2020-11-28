@@ -286,9 +286,12 @@ class TransformerMultiSrcDecoder(DecoderBase):
             opt.alignment_layer,
             alignment_heads=opt.alignment_heads)
 
-    def init_state(self, src, memory_bank, enc_hidden):
+    def init_state(self, src, memory_bank, enc_hidden, template=None):
         """Initialize decoder state."""
         self.state["src"] = src
+        if template is not None:
+            self.state["template"] = template
+
         self.state["cache"] = None
 
     def map_state(self, fn):
@@ -327,7 +330,7 @@ class TransformerMultiSrcDecoder(DecoderBase):
         src_lens = kwargs["memory_lengths"][0]
         template_lens = kwargs["memory_lengths"][1]
         src_max_len = self.state["src"].shape[0]
-        template_max_len = max(template_lens)
+        template_max_len = self.state["template"].shape[0]
         src_pad_mask = ~sequence_mask(src_lens, src_max_len).unsqueeze(1)
         template_pad_mask = ~sequence_mask(template_lens, template_max_len).unsqueeze(1)
         tgt_pad_mask = tgt_words.data.eq(pad_idx).unsqueeze(1)  # [B, 1, T_tgt]
@@ -370,7 +373,9 @@ class TransformerMultiSrcDecoder(DecoderBase):
         return dec_outs, attns
 
     def _init_cache(self, memory_bank, cache_name_format="layer_{}"):
-        self.state["cache"] = {}
+        if self.state.get("cache") is None:
+            self.state["cache"] = {}
+
         batch_size = memory_bank.size(1)
         depth = memory_bank.size(-1)
 

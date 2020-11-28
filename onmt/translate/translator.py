@@ -294,7 +294,10 @@ class Translator(object):
             gs = self._score_target(
                 batch, memory_bank, src_lengths, src_vocabs,
                 batch.src_map if use_src_map else None)
-            self.model.decoder.init_state(src, memory_bank, enc_states)
+            if "TransformerMultiEncoder" in str(type(self.model.encoder)):
+                self.model.decoder.init_state(src, memory_bank, enc_states, template=batch.soft_tgt_templ[0])
+            else:
+                self.model.decoder.init_state(src, memory_bank, enc_states)
         else:
             gs = [0] * batch_size
         return gs
@@ -592,7 +595,11 @@ class Translator(object):
         src_lengths = tile(src_lengths, n_best)  # ``(batch * n_best,)``
 
         # (3) Init decoder with n_best src,
-        self.model.decoder.init_state(src, memory_bank, enc_states)
+        if "TransformerMultiEncoder" in str(type(self.model.encoder)):
+            self.model.decoder.init_state(src, memory_bank, enc_states, template=batch.soft_tgt_templ[0])
+        else:
+            self.model.decoder.init_state(src, memory_bank, enc_states)
+
         # reshape tgt to ``(len, batch * n_best, nfeat)``
         tgt = batch_tgt_idxs.view(-1, batch_tgt_idxs.size(-1)).T.unsqueeze(-1)
         dec_in = tgt[:-1]  # exclude last target from inputs
@@ -659,7 +666,7 @@ class Translator(object):
                 .type_as(memory_bank) \
                 .long() \
                 .fill_(memory_bank.size(0))
-        return torch.cat((src, batch.soft_tgt_templ[0]), dim=0), enc_states, memory_bank, src_lengths
+        return src, enc_states, memory_bank, src_lengths
 
     def _decode_and_generate(
             self,
@@ -761,18 +768,12 @@ class Translator(object):
         # ===
 
         src, enc_states, memory_bank, src_lengths = self._run_encoder(batch)
-        if "CombinedTransformerRnnEncoder" in str(type(self.model.encoder)):
-            if "InputFeedRNNDecoder" in str(type(self.model.decoder)):
-                enc_final_states = []
-                for i, layer in enumerate(self.model.encoder.transformer):
-                    enc_final_state = layer.encoder_state["final_state"]
-                    memory_bank = layer.encoder_state["memory_bank"]
-                    enc_final_state = torch.cat(enc_final_state, dim=0)
-                    layer.encoder_state = {}
-                    enc_final_states.append(enc_final_state)
-                enc_states = tuple(enc_final_states)
+        if "TransformerMultiEncoder" in str(type(self.model.encoder)):
+            template = batch.soft_tgt_templ[0]
+            self.model.decoder.init_state(src, memory_bank, enc_states, template=template)
+        else:
+            self.model.decoder.init_state(src, memory_bank, enc_states)
 
-        self.model.decoder.init_state(src, memory_bank, enc_states)
         if hasattr(self.model, "enc_generator"):
             enc_label_scores = self.model.enc_generator(memory_bank.view(-1, memory_bank.size(2))) \
                 .view(memory_bank.shape[0], memory_bank.shape[1], -1)
@@ -805,9 +806,27 @@ class Translator(object):
         # (2) prep decode_strategy. Possibly repeat src objects.
         src_map = batch.src_map if use_src_map else None
         target_prefix = batch.tgt if self.tgt_prefix else None
-        fn_map_state, memory_bank, memory_lengths, src_map = \
-            decode_strategy.initialize(memory_bank, src_lengths, src_map,
-                                       target_prefix=target_prefix)
+        if "TransformerMultiEncoder" in str(type(self.model.encoder)):
+
+            fn_map_state, src_memory_bank, src_lengths_out, src_map = \
+                decode_strategy.initialize(memory_bank[0], src_lengths[0], src_map=src_map, target_prefix=target_prefix)
+
+            _, templ_memory_bank, templ_memory_lengths, _ = \
+                decode_strategy.initialize(memory_bank[1], src_lengths[1], src_map=src_map,
+                                           target_prefix=target_prefix)
+
+            # decode_strategy.memory_lengths = src_lengths
+            # decode_strategy.templ_memory_lengths = templ_memory_lengths
+
+            memory_lengths = (src_lengths_out, templ_memory_lengths)
+            memory_bank = (src_memory_bank, templ_memory_bank)
+            decode_strategy.memory_lengths = src_lengths_out
+
+        else:
+            fn_map_state, memory_bank, memory_lengths, src_map = \
+                decode_strategy.initialize(memory_bank, src_lengths, src_map,
+                                           target_prefix=target_prefix)
+
         if fn_map_state is not None:
             self.model.decoder.map_state(fn_map_state)
 
@@ -853,7 +872,11 @@ class Translator(object):
                 else:
                     memory_bank = memory_bank.index_select(1, select_indices)
 
-                memory_lengths = memory_lengths.index_select(0, select_indices)
+                if "TransformerMultiEncoder" in str(type(self.model.encoder)):
+                    memory_lengths = (memory_lengths[0].index_select(0, select_indices),
+                                      memory_lengths[1].index_select(0, select_indices))
+                else:
+                    memory_lengths = memory_lengths.index_select(0, select_indices)
 
                 if src_map is not None:
                     src_map = src_map.index_select(1, select_indices)
