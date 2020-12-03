@@ -2,6 +2,8 @@
 from __future__ import print_function
 
 import configargparse
+import onmt
+
 from onmt.models.sru import CheckSRU
 
 
@@ -71,10 +73,11 @@ def model_opts(parser):
               help='Data type of the model.')
 
     group.add('--encoder_type', '-encoder_type', type=str, default='rnn',
-              choices=['rnn', 'brnn', 'mean', 'transformer', 'transformer-rnn', 'cnn', 'rnn-selfattn'],
+              choices=['rnn', 'brnn', 'ggnn', 'mean', 'transformer', 'cnn', 'transformer-rnn', 'rnn-selfattn'],
               help="Type of encoder layer to use. Non-RNN layers "
                    "are experimental. Options are "
-                   "[rnn|brnn|mean|transformer|transformer-rnn|cnn|rnn-selfattn].")
+                   "[rnn|brnn|ggnn|mean|transformer|cnn|transformer-rnn|rnn-selfattn].")
+
     group.add('--decoder_type', '-decoder_type', type=str, default='rnn',
               choices=['rnn', 'transformer', 'cnn', 'transformer-rnn',],
               help="Type of decoder layer to use. Non-RNN layers "
@@ -130,6 +133,27 @@ def model_opts(parser):
               help="Type of context gate to use. "
                    "Do not select for no context gate.")
 
+    # The following options (bridge_extra_node to src_vocab) are used
+    # for training with --encoder_type ggnn (Gated Graph Neural Network).
+    group.add('--bridge_extra_node', '-bridge_extra_node',
+              type=bool, default=True,
+              help='Graph encoder bridges only extra node to decoder as input')
+    group.add('--bidir_edges', '-bidir_edges', type=bool, default=True,
+              help='Graph encoder autogenerates bidirectional edges')
+    group.add('--state_dim', '-state_dim', type=int, default=512,
+              help='Number of state dimensions in the graph encoder')
+    group.add('--n_edge_types', '-n_edge_types', type=int, default=2,
+              help='Number of edge types in the graph encoder')
+    group.add('--n_node', '-n_node', type=int, default=2,
+              help='Number of nodes in the graph encoder')
+    group.add('--n_steps', '-n_steps', type=int, default=2,
+              help='Number of steps to advance graph encoder')
+    # The ggnn uses src_vocab during training because the graph is built
+    # using edge information which requires parsing the input sequence.
+    group.add('--src_vocab', '-src_vocab', default="",
+              help="Path to an existing source vocabulary. Format: "
+                   "one word per line.")
+
     # Attention options
     group = parser.add_argument_group('Model- Attention')
     group.add('--global_attention', '-global_attention',
@@ -164,7 +188,7 @@ def model_opts(parser):
                    "https://arxiv.org/abs/1909.02074")
     group.add('--alignment_layer', '-alignment_layer', type=int, default=-3,
               help='Layer number which has to be supervised.')
-    group.add('--alignment_heads', '-alignment_heads', type=int, default=None,
+    group.add('--alignment_heads', '-alignment_heads', type=int, default=0,
               help='N. of cross attention heads per layer to supervised with')
     group.add('--full_context_alignment', '-full_context_alignment',
               action="store_true",
@@ -346,6 +370,15 @@ def preprocess_opts(parser):
               help="Using grayscale image can training "
                    "model faster and smaller")
 
+    # Options for experimental source noising (BART style)
+    group = parser.add_argument_group('Noise')
+    group.add('--subword_prefix', '-subword_prefix',
+              type=str, default="▁",
+              help="subword prefix to build wordstart mask")
+    group.add('--subword_prefix_is_joiner', '-subword_prefix_is_joiner',
+              action='store_true',
+              help="mask will need to be inverted if prefix is joiner")
+
 
 def train_opts(parser):
     """ Training and saving options """
@@ -360,6 +393,8 @@ def train_opts(parser):
     group.add('--data_weights', '-data_weights', type=int, nargs='+',
               default=[1], help="""Weights of different corpora,
               should follow the same order as in -data_ids.""")
+    group.add('--data_to_noise', '-data_to_noise', nargs='+', default=[],
+              help="IDs of datasets on which to apply noise.")
 
     group.add('--save_model', '-save_model', default='model',
               help="Model filename (the model will be saved as "
@@ -388,7 +423,7 @@ def train_opts(parser):
               help="IP of master for torch.distributed training.")
     group.add('--master_port', '-master_port', default=10000, type=int,
               help="Port of master for torch.distributed training.")
-    group.add('--queue_size', '-queue_size', default=400, type=int,
+    group.add('--queue_size', '-queue_size', default=40, type=int,
               help="Size of queue for each process in producer/consumer")
 
     group.add('--seed', '-seed', type=int, default=-1,
@@ -433,6 +468,9 @@ def train_opts(parser):
     group = parser.add_argument_group('Optimization- Type')
     group.add('--batch_size', '-batch_size', type=int, default=64,
               help='Maximum batch size for training')
+    group.add('--batch_size_multiple', '-batch_size_multiple',
+              type=int, default=None,
+              help='Batch size multiple for token batches.')
     group.add('--batch_type', '-batch_type', default='sents',
               choices=["sents", "tokens"],
               help="Batch grouping for batch_size. Standard "
@@ -533,6 +571,12 @@ def train_opts(parser):
               help="Step for moving average. "
                    "Default is every update, "
                    "if -average_decay is set.")
+    group.add("--src_noise", "-src_noise", type=str, nargs='+',
+              default=[],
+              choices=onmt.modules.source_noise.MultiNoise.NOISES.keys())
+    group.add("--src_noise_prob", "-src_noise_prob", type=float, nargs='+',
+              default=[],
+              help="Probabilities of src_noise functions")
 
     # learning rate
     group = parser.add_argument_group('Optimization- Rate')
@@ -624,6 +668,8 @@ def translate_opts(parser):
               help='Source directory for image or audio files')
     group.add('--tgt', '-tgt',
               help='True target sequence (optional)')
+    group.add('--tgt_prefix', '-tgt_prefix', action='store_true',
+              help='Generate predictions using provided `-tgt` as prefix.')
     group.add('--shard_size', '-shard_size', type=int, default=10000,
               help="Divide src and tgt (if applicable) into "
                    "smaller multiple src and tgt files, then "
@@ -637,12 +683,6 @@ def translate_opts(parser):
                    "be the decoded sequence")
     group.add('--report_align', '-report_align', action='store_true',
               help="Report alignment for each translation.")
-    group.add('--report_bleu', '-report_bleu', action='store_true',
-              help="Report bleu score after translation, "
-                   "call tools/multi-bleu.perl on command line")
-    group.add('--report_rouge', '-report_rouge', action='store_true',
-              help="Report rouge 1/2/3/L/SU4 score after translation "
-                   "call tools/test_rouge.py on command line")
     group.add('--report_time', '-report_time', action='store_true',
               help="Report some translation time metrics")
 

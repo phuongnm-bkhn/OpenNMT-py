@@ -41,8 +41,9 @@ def extract_alignment(align_matrix, tgt_mask, src_lens, n_best):
         * B: denote flattened batch as B = batch_size * n_best.
 
     Returns:
-        alignments (List[List[FloatTensor]]): ``(batch_size, n_best,)``,
-         containing valid alignment matrix for each translation.
+        alignments (List[List[FloatTensor|None]]): ``(batch_size, n_best,)``,
+         containing valid alignment matrix (or None if blank prediction)
+         for each translation.
     """
     batch_size_n_best = align_matrix.size(0)
     assert batch_size_n_best % n_best == 0
@@ -54,52 +55,63 @@ def extract_alignment(align_matrix, tgt_mask, src_lens, n_best):
             zip(align_matrix, tgt_mask, src_lens)):
         valid_tgt = ~tgt_mask_b
         valid_tgt_len = valid_tgt.sum()
-        # get valid alignment (sub-matrix from full paded aligment matrix)
-        am_valid_tgt = am_b.masked_select(valid_tgt.unsqueeze(-1)) \
-                           .view(valid_tgt_len, -1)
-        valid_alignment = am_valid_tgt[:, :src_len]  # only keep valid src
+        if valid_tgt_len == 0:
+            # No alignment if not exist valid tgt token
+            valid_alignment = None
+        else:
+            # get valid alignment (sub-matrix from full paded aligment matrix)
+            am_valid_tgt = am_b.masked_select(valid_tgt.unsqueeze(-1)) \
+                               .view(valid_tgt_len, -1)
+            valid_alignment = am_valid_tgt[:, :src_len]  # only keep valid src
         alignments[i // n_best].append(valid_alignment)
 
     return alignments
 
 
 def build_align_pharaoh(valid_alignment):
-    """Convert valid alignment matrix to i-j Pharaoh format.(0 indexed)"""
+    """Convert valid alignment matrix to i-j (from 0) Pharaoh format pairs,
+    or empty list if it's None.
+    """
     align_pairs = []
-    tgt_align_src_id = valid_alignment.argmax(dim=-1)
+    if isinstance(valid_alignment, torch.Tensor):
+        tgt_align_src_id = valid_alignment.argmax(dim=-1)
 
-    for tgt_id, src_id in enumerate(tgt_align_src_id.tolist()):
-        align_pairs.append(str(src_id) + "-" + str(tgt_id))
-    align_pairs.sort(key=lambda x: int(x.split('-')[-1]))  # sort by tgt_id
-    align_pairs.sort(key=lambda x: int(x.split('-')[0]))  # sort by src_id
+        for tgt_id, src_id in enumerate(tgt_align_src_id.tolist()):
+            align_pairs.append(str(src_id) + "-" + str(tgt_id))
+        align_pairs.sort(key=lambda x: int(x.split('-')[-1]))  # sort by tgt_id
+        align_pairs.sort(key=lambda x: int(x.split('-')[0]))  # sort by src_id
     return align_pairs
 
 
-def to_word_align(src, tgt, subword_align, mode):
+def to_word_align(src, tgt, subword_align, m_src='joiner', m_tgt='joiner'):
     """Convert subword alignment to word alignment.
 
     Args:
         src (string): tokenized sentence in source language.
         tgt (string): tokenized sentence in target language.
         subword_align (string): align_pharaoh correspond to src-tgt.
-        mode (string): tokenization mode used by src and tgt,
-            choose from ["joiner", "spacer"].
+        m_src (string): tokenization mode used in src,
+            can be ["joiner", "spacer"].
+        m_tgt (string): tokenization mode used in tgt,
+            can be ["joiner", "spacer"].
 
     Returns:
         word_align (string): converted alignments correspand to
             detokenized src-tgt.
     """
+    assert m_src in ["joiner", "spacer"], "Invalid value for argument m_src!"
+    assert m_tgt in ["joiner", "spacer"], "Invalid value for argument m_tgt!"
+
     src, tgt = src.strip().split(), tgt.strip().split()
     subword_align = {(int(a), int(b)) for a, b in (x.split("-")
                      for x in subword_align.split())}
-    if mode == 'joiner':
-        src_map = subword_map_by_joiner(src, marker='￭')
-        tgt_map = subword_map_by_joiner(tgt, marker='￭')
-    elif mode == 'spacer':
-        src_map = subword_map_by_spacer(src, marker='▁')
-        tgt_map = subword_map_by_spacer(tgt, marker='▁')
-    else:
-        raise ValueError("Invalid value for argument mode!")
+
+    src_map = (subword_map_by_spacer(src, marker='▁') if m_src == 'spacer'
+               else subword_map_by_joiner(src, marker='￭'))
+
+    tgt_map = (subword_map_by_spacer(src, marker='▁') if m_tgt == 'spacer'
+               else subword_map_by_joiner(src, marker='￭'))
+
     word_align = list({"{}-{}".format(src_map[a], tgt_map[b])
                        for a, b in subword_align})
     word_align.sort(key=lambda x: int(x.split('-')[-1]))  # sort by tgt_id
