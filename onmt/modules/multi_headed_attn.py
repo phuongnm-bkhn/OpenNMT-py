@@ -33,7 +33,7 @@ class NgramLSTM(nn.Module):
         self.hidden_size = input_size
         self.in_decoder = in_decoder
         if self.in_decoder:
-            self.bidirectional = False
+            self.bidirectional = True
         else:
             self.bidirectional = True
 
@@ -280,11 +280,8 @@ class MultiHeadedAttention(nn.Module):
 
         # ngram feature for q, k, v
         if self.n_gram_features is not None:
-            if self.in_decoder and layer_cache is not None and attn_type == "self" and (
-                    layer_cache["self_queries"] is not None and layer_cache["self_keys"] is not None and
-                    layer_cache["self_values"] is not None
-            ):
-                _q, _k, _v = layer_cache["self_queries"], layer_cache["self_keys"], layer_cache["self_values"]
+            if self.in_decoder and attn_type == "self" and layer_cache is not None:
+                _q, _k, _v = query_cached, key, value
                 idx_head_layer = 0
                 _seq_len = _q.size(2)
                 for gram_size, count_h_using in self.n_gram_features_count.items():
