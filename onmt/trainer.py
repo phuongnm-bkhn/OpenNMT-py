@@ -292,7 +292,7 @@ class Trainer(object):
                     self.earlystopper(valid_stats, step)
 
                     # If this step increase performance => save the best model
-                    if self.earlystopper.is_improving():
+                    if self.model_saver is not None and self.earlystopper.is_improving():
                         self.model_saver.save_best(moving_average=self.moving_average)
 
                     # If the patience has reached the limit, stop training

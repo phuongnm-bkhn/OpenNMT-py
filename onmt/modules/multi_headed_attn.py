@@ -141,7 +141,10 @@ class MultiHeadedAttention(nn.Module):
                                       head_count * self.dim_per_head)
         self.softmax = nn.Softmax(dim=-1)
         self.dropout = nn.Dropout(dropout)
-        self.final_linear = nn.Linear(model_dim, model_dim)
+        if gram_sizes is not None and len(gram_sizes) == head_count:
+            self.final_linear = nn.Linear(3*model_dim, model_dim)
+        else:
+            self.final_linear = nn.Linear(model_dim, model_dim)
 
         self.max_relative_positions = max_relative_positions
 
@@ -273,8 +276,14 @@ class MultiHeadedAttention(nn.Module):
                 value = value.masked_fill(mask_qkv, 0)
 
             idx_head_layer = 0
+            local_context_q = None
+            local_context_k = None
+            local_context_v = None
             for gram_size, count_h_using in self.n_gram_features_count.items():
                 if gram_size == 0:
+                    local_context_q = query[:, idx_head_layer:idx_head_layer+count_h_using, :, :]
+                    local_context_k = key[:, idx_head_layer:idx_head_layer+count_h_using, :, :]
+                    local_context_v = value[:, idx_head_layer:idx_head_layer+count_h_using, :, :]
                     idx_head_layer += count_h_using
                     continue
                 ngram_features_extractor = self.n_gram_features["{}_gram_features".format(gram_size)]
@@ -284,10 +293,30 @@ class MultiHeadedAttention(nn.Module):
                                   ], dim=0).reshape(-1, query_len, dim_per_head)
                 _yy = ngram_features_extractor(_xx).reshape(3, -1, query_len, dim_per_head)
                 _q, _k, _v = _yy[0], _yy[1], _yy[2]
-                query[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _q.reshape(batch_size, -1, query_len, dim_per_head)
-                key[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
-                value[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
+                local_context_q = torch.cat([local_context_q, _q.reshape(batch_size, -1, query_len, dim_per_head)],
+                                            dim=1) if local_context_q is not None else _q.reshape(batch_size, -1, query_len, dim_per_head)
+                local_context_k = torch.cat([local_context_k, _k.reshape(batch_size, -1, query_len, dim_per_head)],
+                                            dim=1) if local_context_k is not None else _k.reshape(batch_size, -1, query_len, dim_per_head)
+                local_context_v = torch.cat([local_context_v, _v.reshape(batch_size, -1, query_len, dim_per_head)],
+                                            dim=1) if local_context_v is not None else _v.reshape(batch_size, -1, query_len, dim_per_head)
                 idx_head_layer += count_h_using
+
+            local_context_q = local_context_q / math.sqrt(dim_per_head)
+            scores_cc = torch.matmul(local_context_q, local_context_k.transpose(2, 3))
+            scores_cc = scores_cc.float()
+            if mask is not None:
+                scores_cc = scores_cc.masked_fill(mask.unsqueeze(1), -1e18)
+            attn_cc = self.softmax(scores_cc).to(query.dtype)
+            drop_attn_cc = self.dropout(attn_cc)
+            local_context_v = torch.matmul(drop_attn_cc, local_context_v)
+
+            scores_cw = torch.matmul(query / math.sqrt(dim_per_head), local_context_k.transpose(2, 3))
+            scores_cw = scores_cw.float()
+            if mask is not None:
+                scores_cw = scores_cw.masked_fill(mask.unsqueeze(1), -1e18)
+            attn_cw = self.softmax(scores_cw).to(query.dtype)
+            drop_attn_cw = self.dropout(attn_cw)
+            local_context_word_v = torch.matmul(drop_attn_cw, value)
 
         key_len = key.size(2)
         query_len = query.size(2)
@@ -321,7 +350,11 @@ class MultiHeadedAttention(nn.Module):
         else:
             context = unshape(context_original)
 
-        output = self.final_linear(context)
+        if self.n_gram_features is not None:
+            # incorporating information from context
+            output = self.final_linear(torch.cat([context, unshape(local_context_word_v), unshape(local_context_v)], dim=-1))
+        else:
+            output = self.final_linear(context)
         # CHECK
         # batch_, q_len_, d_ = output.size()
         # aeq(q_len, q_len_)
