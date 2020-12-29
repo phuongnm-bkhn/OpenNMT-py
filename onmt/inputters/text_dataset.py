@@ -151,6 +151,94 @@ class TextMultiField(RawField):
         return self.fields[item]
 
 
+class BiGramField(RawField):
+
+    def __init__(self, base_name, base_field, min_transmission_prob, min_diff_neighbor_words_prob=0.8):
+        super(BiGramField, self).__init__()
+        self.min_transmission_prob = min_transmission_prob
+        self.min_diff_neighbor_words_prob = min_diff_neighbor_words_prob
+        self.fields = [(base_name, base_field)]
+
+    @property
+    def base_field(self):
+        return self.fields[0][1]
+
+    def process(self, batch, device=None):
+        """Convert outputs of preprocess into Tensors.
+
+        Args:
+            batch (List[List[List[str]]]): A list of length batch size.
+                Each element is a list of the preprocess results for each
+                field (which are lists of str "words" or feature tags.
+            device (torch.device or str): The device on which the tensor(s)
+                are built.
+
+        Returns:
+            torch.LongTensor or Tuple[LongTensor, LongTensor]:
+                A tensor of shape ``(seq_len, batch_size, len(self.fields))``
+                where the field features are ordered like ``self.fields``.
+                If the base field returns lengths, these are also returned
+                and have shape ``(batch_size,)``.
+        """
+
+        # batch (list(list(list))): batch_size x len(self.fields) x seq_len
+        batch_by_feat = list(zip(*batch))
+        batch_phrase_indices = []
+        for sent in batch_by_feat[0]:
+            if len(sent) == 0:
+                continue
+            transmission_prob = []
+            diff_neighbor_words_prob = []
+            for bi_gram in sent:
+                first_w, second_w = bi_gram.split(" ")
+                if self.base_field.vocab.freqs[first_w] != 0:
+                    transmission_prob.append(self.base_field.vocab.freqs[bi_gram] / self.base_field.vocab.freqs[first_w])
+                else:
+                    transmission_prob.append(0.0)
+
+                max_neighbor_prob = max(self.base_field.vocab.freqs[first_w], self.base_field.vocab.freqs[second_w])
+                if max_neighbor_prob != 0:
+                    diff_neighbor_words_prob.append(
+                        abs(self.base_field.vocab.freqs[first_w] - self.base_field.vocab.freqs[second_w]) /
+                        max_neighbor_prob)
+                else:
+                    diff_neighbor_words_prob.append(1.0)
+
+            phrase_indices = []
+            cur_phrase = [0]
+            for i, tran in enumerate(transmission_prob):
+                if tran < self.min_transmission_prob or diff_neighbor_words_prob[i] > self.min_diff_neighbor_words_prob:
+                    if len(cur_phrase) > 1:
+                        phrase_indices.append(torch.LongTensor(cur_phrase, device=device))
+                    cur_phrase = [i+1]
+                else:
+                    cur_phrase.append(i+1)
+
+                if i == len(transmission_prob) - 1 and len(cur_phrase) > 1:
+                    phrase_indices.append(torch.LongTensor(cur_phrase, device=device))
+
+            batch_phrase_indices.append(phrase_indices)
+
+        return batch_phrase_indices
+
+    def preprocess(self, x):
+        """Preprocess data.
+
+        Args:
+            x (str): A sentence string (words joined by whitespace).
+
+        Returns:
+            List[List[str]]: A list of length ``len(self.fields)`` containing
+                lists of tokens/feature tags for the sentence. The output
+                is ordered like ``self.fields``.
+        """
+
+        return [f.preprocess(x) for _, f in self.fields]
+
+    def __getitem__(self, item):
+        return self.fields[item]
+
+
 def text_fields(**kwargs):
     """Create text fields.
 

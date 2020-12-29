@@ -463,11 +463,11 @@ class Translator(object):
                         self.logger.info(output)
                     else:
                         os.write(1, output.encode('utf-8'))
-                    #if not self.verbose:
-                    #    sent_number = next(counter)
-                    #viz_attention(self_attn_folder_save, "align-attn",
-                    #              torch.unsqueeze(torch.unsqueeze(trans.attns[0][:, :len(srcs)], 0), 0),
-                    #              srcs, trans.pred_sents[0], base_cell=0.25, sent_number=sent_number)
+                    if not self.verbose:
+                       sent_number = next(counter)
+                    viz_attention(self_attn_folder_save, "align-attn",
+                                 torch.unsqueeze(torch.unsqueeze(trans.attns[0][:, :len(srcs)], 0), 0),
+                                 srcs, trans.pred_sents[0], base_cell=0.25, sent_number=sent_number)
                 if self_attn_debug:
                     if not self.verbose:
                         sent_number = next(counter)
@@ -482,8 +482,8 @@ class Translator(object):
                     attention_infor = [
                         ("self-attn-debug", trans.self_attn[:, :, :len(srcs), :len(srcs)],
                          srcs, srcs, 1.2),
-                        ("decoding-self-attn-debug", trans.decoding_self_attn[0][:, :, :len(tgt_raw), :len(tgt_raw)],
-                         ["<s>"] + tgt_raw[:-1], ["<s>"] + tgt_raw[:-1], 1.2),
+                        # ("decoding-self-attn-debug", trans.decoding_self_attn[0][:, :, :len(tgt_raw), :len(tgt_raw)],
+                        #  ["<s>"] + tgt_raw[:-1], ["<s>"] + tgt_raw[:-1], 1.2),
                     ]
                     for (folder_name, self_attn_data, x_stick, y_stick, base_cell) in attention_infor:
                         viz_attention(self_attn_folder_save, folder_name, self_attn_data, x_stick, y_stick, base_cell,
@@ -637,7 +637,7 @@ class Translator(object):
             else (batch.src, None)
 
         enc_states, memory_bank, src_lengths = self.model.encoder(
-            src, src_lengths)
+            src, src_lengths, **{"trans_layer_params":{"phrase_info": batch.phrase_info}})
         if src_lengths is None:
             assert not isinstance(memory_bank, tuple), \
                 'Ensemble decoding only supported for text data'

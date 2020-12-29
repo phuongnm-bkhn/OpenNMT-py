@@ -292,7 +292,7 @@ class Trainer(object):
                     self.earlystopper(valid_stats, step)
 
                     # If this step increase performance => save the best model
-                    if self.earlystopper.is_improving():
+                    if self.model_saver is not None and self.earlystopper.is_improving():
                         self.model_saver.save_best(moving_average=self.moving_average)
 
                     # If the patience has reached the limit, stop training
@@ -342,7 +342,10 @@ class Trainer(object):
                 with torch.cuda.amp.autocast(enabled=self.optim.amp):
                     # F-prop through the model.
                     outputs, attns, enc_hiddens = valid_model(src, tgt, src_lengths,
-                                                              with_align=self.with_align)
+                                                              with_align=self.with_align,
+                                                              **{"encoder": {
+                                                                  "trans_layer_params": {"phrase_info":
+                                                                                             batch.phrase_info}}})
 
                     # Compute loss.
                     _, batch_stats = self.valid_loss(batch, outputs, attns, enc_hiddens=enc_hiddens)
@@ -393,7 +396,8 @@ class Trainer(object):
                 with torch.cuda.amp.autocast(enabled=self.optim.amp):
                     outputs, attns, enc_hiddens = self.model(
                         src, tgt, src_lengths, bptt=bptt,
-                        with_align=self.with_align)
+                        with_align=self.with_align, **{"encoder": {"trans_layer_params": {"phrase_info":
+                                                                                              batch.phrase_info}}})
                     bptt = True
 
                     # 3. Compute loss.

@@ -13,7 +13,7 @@ from torchtext.data import Field, RawField, LabelField
 from torchtext.vocab import Vocab
 from torchtext.data.utils import RandomShuffler
 
-from onmt.inputters.text_dataset import text_fields, TextMultiField
+from onmt.inputters.text_dataset import text_fields, TextMultiField, BiGramField
 from onmt.inputters.image_dataset import image_fields
 from onmt.inputters.audio_dataset import audio_fields
 from onmt.inputters.vec_dataset import vec_fields
@@ -170,6 +170,13 @@ def get_fields(
                         "base_name": "src_label"}
     if marking_mechanism:
         fields["src_label"] = fields_getters["text"](**tgt_field_kwargs)
+
+    dynamic_phrase = True
+    if dynamic_phrase:
+        fields["phrase_info"] = BiGramField(base_name='phrase_info',
+                                            min_transmission_prob=0.2,
+                                            min_diff_neighbor_words_prob=0.8,
+                                            base_field=Field(include_lengths=False))
 
     indices = Field(use_vocab=False, dtype=torch.long, sequential=False)
     fields["indices"] = indices
@@ -450,6 +457,14 @@ def _build_fields_vocab(fields, counters, data_type, share_vocab,
             src_label_multifield = fields["src_label"]
             _build_fv_from_multifield(
                 src_label_multifield,
+                counters,
+                build_fv_args,
+                size_multiple=1)
+        if "phrase_info" in fields:
+            build_fv_args["phrase_info"] = dict()
+            counters['phrase_info'].update(counters['src'])
+            _build_fv_from_multifield(
+                fields["phrase_info"],
                 counters,
                 build_fv_args,
                 size_multiple=1)

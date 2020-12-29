@@ -19,8 +19,8 @@ class NgramCombined(nn.Module):
         if self.n_gram > 1:
             for i_gram in range(1, self.n_gram):
                 out = F.pad(x.transpose(-1, -2), [i_gram, 0],
-                            mode='constant', value=0).transpose(-1, -2)[:,:-i_gram,:] + x
-        return out
+                            mode='constant', value=0).transpose(-1, -2)[:,:-i_gram,:] + out
+        return out / self.n_gram
 
 
 class NgramLSTM(nn.Module):
@@ -125,7 +125,7 @@ class MultiHeadedAttention(nn.Module):
     """
 
     def __init__(self, head_count, model_dim, dropout=0.1,
-                 max_relative_positions=0, gram_sizes=None):
+                 max_relative_positions=0, gram_sizes=None, dyn_statistic_phrase=None):
         assert model_dim % head_count == 0
         self.dim_per_head = model_dim // head_count
         self.model_dim = model_dim
@@ -152,6 +152,10 @@ class MultiHeadedAttention(nn.Module):
             self.n_gram_features = nn.ModuleDict(ngram_size_info)
             self.n_gram_features_count = dict([(gram_size, len([_x for _x in gram_sizes if _x == gram_size]))
                                                for gram_size in set(gram_sizes)])
+        self.phrase_features = None
+        if dyn_statistic_phrase:
+            self.phrase_features = nn.LSTM(self.dim_per_head, self.dim_per_head // 2, batch_first=False,
+                                           num_layers=1, bidirectional=True)
 
         if max_relative_positions > 0:
             vocab_size = max_relative_positions * 2 + 1
@@ -159,7 +163,7 @@ class MultiHeadedAttention(nn.Module):
                 vocab_size, self.dim_per_head)
 
     def forward(self, key, value, query, mask=None,
-                layer_cache=None, attn_type=None):
+                layer_cache=None, attn_type=None, phrase_info=None):
         """
         Compute the context vector and the attention vectors.
 
@@ -288,6 +292,27 @@ class MultiHeadedAttention(nn.Module):
                 key[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
                 value[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
                 idx_head_layer += count_h_using
+
+        if self.phrase_features:
+            if mask is not None:
+                mask_qkv = mask.unsqueeze(-1)  # [B, 1, seq_len, 1]
+                query = query.masked_fill(mask_qkv, 0)
+                key = key.masked_fill(mask_qkv, 0)
+                value = value.masked_fill(mask_qkv, 0)
+            for i_sample, sample in enumerate(phrase_info):
+                for ph in sample:
+                    # prepare data
+                    sample_inputs = torch.cat([query[i_sample].index_select(dim=1, index=ph),
+                                               key[i_sample].index_select(dim=1, index=ph),
+                                               value[i_sample].index_select(dim=1, index=ph)]).transpose(0, 1)
+                    # forward using lstm
+                    sample_phrase, _end_state = self.phrase_features(sample_inputs)
+
+                    # replace original features
+                    sample_phrase = sample_phrase.transpose(0, 1).reshape(3, head_count, -1, dim_per_head)
+                    query[i_sample].index_copy_(1, ph, sample_phrase[0])
+                    key[i_sample].index_copy_(1, ph, sample_phrase[1])
+                    value[i_sample].index_copy_(1, ph, sample_phrase[2])
 
         key_len = key.size(2)
         query_len = query.size(2)
