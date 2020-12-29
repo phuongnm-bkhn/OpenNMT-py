@@ -240,6 +240,8 @@ class IterOnDevice(object):
                 if hasattr(batch, 'align') else None
             batch.corpus_id = batch.corpus_id.to(device) \
                 if hasattr(batch, 'corpus_id') else None
+            batch.phrase_info = [[ph.to(device) for ph in s] for s in batch.phrase_info] \
+                if hasattr(batch, 'phrase_info') else None
 
     def __iter__(self):
         for batch in self.iterable:
