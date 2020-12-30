@@ -299,20 +299,44 @@ class MultiHeadedAttention(nn.Module):
                 query = query.masked_fill(mask_qkv, 0)
                 key = key.masked_fill(mask_qkv, 0)
                 value = value.masked_fill(mask_qkv, 0)
-            for i_sample, sample in enumerate(phrase_info):
-                for ph in sample:
-                    # prepare data
-                    sample_inputs = torch.cat([query[i_sample].index_select(dim=1, index=ph),
-                                               key[i_sample].index_select(dim=1, index=ph),
-                                               value[i_sample].index_select(dim=1, index=ph)]).transpose(0, 1)
-                    # forward using lstm
-                    sample_phrase, _end_state = self.phrase_features(sample_inputs)
 
-                    # replace original features
-                    sample_phrase = sample_phrase.transpose(0, 1).reshape(3, head_count, -1, dim_per_head)
-                    query[i_sample].index_copy_(1, ph, sample_phrase[0])
-                    key[i_sample].index_copy_(1, ph, sample_phrase[1])
-                    value[i_sample].index_copy_(1, ph, sample_phrase[2])
+            phrase_mask = phrase_info[1]
+            phrase_indices = phrase_info[0]
+            max_phrase_len = phrase_info[0].shape[1]
+            max_sent_len = query.shape[2]
+
+            # prepare data
+            # fill out phrase by indices - flatten cross-sentence in batch
+            def phrase_process(q_in):
+                query_t = q_in.transpose(0, 1).reshape(head_count, -1, dim_per_head)
+                phrase_features = query_t.index_select(1, phrase_indices.flatten())  # tensor([ 2,  3,  4,  0,|  6,  7,  8,  9, | 13, 14,  0,  0, | ... ])
+                                                                                     # some zero values is the faked indices
+                phrase_features = phrase_features.reshape(head_count, -1, max_phrase_len, dim_per_head)
+                phrase_features.masked_fill_(phrase_mask.unsqueeze(dim=0).unsqueeze(dim=-1), 0)  # fill zero values in faked indices
+                phrase_features = phrase_features.reshape(-1, max_phrase_len, dim_per_head)  # virtual_batch x seq x dim
+
+                # forward using lstm
+                phrase_features, _last_h = (self.phrase_features(phrase_features.transpose(0, 1)))
+                phrase_features = phrase_features.transpose(0, 1).reshape(head_count, -1, max_phrase_len, dim_per_head)
+
+                # replace original features
+                phrase_un_mask = phrase_mask==False
+                phrase_indices_flatten = phrase_indices.masked_select(phrase_un_mask)
+                phrase_features_flatten = phrase_features.transpose(0,1).transpose(1,2)\
+                    .masked_select(phrase_un_mask.unsqueeze(-1).unsqueeze(-1))
+
+                query_mask = torch.zeros(max_sent_len*batch_size)
+                query_mask[phrase_indices_flatten] = 1
+                query_mask = query_mask == 1
+                q_in = q_in.transpose(1, 2)
+                q_in = q_in.reshape(-1, head_count, dim_per_head).masked_scatter(query_mask.unsqueeze(-1).unsqueeze(-1),
+                                                                                   phrase_features_flatten)
+                q_in = q_in.reshape(batch_size, -1, head_count, dim_per_head).transpose(1, 2)
+                return q_in
+
+            query = phrase_process(query)
+            key = phrase_process(key)
+            value = phrase_process(value)
 
         key_len = key.size(2)
         query_len = query.size(2)

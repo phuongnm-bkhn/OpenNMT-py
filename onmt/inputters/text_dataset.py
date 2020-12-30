@@ -184,7 +184,11 @@ class BiGramField(RawField):
         # batch (list(list(list))): batch_size x len(self.fields) x seq_len
         batch_by_feat = list(zip(*batch))
         batch_phrase_indices = []
+        max_sent_len = 0
+        max_phrase_len = 0
         for sent in batch_by_feat[0]:
+            max_sent_len = max(max_sent_len, len(sent) + 1)
+        for i_sent, sent in enumerate(batch_by_feat[0]):
             if len(sent) == 0:
                 continue
             transmission_prob = []
@@ -204,22 +208,30 @@ class BiGramField(RawField):
                 else:
                     diff_neighbor_words_prob.append(1.0)
 
-            phrase_indices = []
-            cur_phrase = [0]
+            cur_phrase = [0 + i_sent*max_sent_len]
             for i, tran in enumerate(transmission_prob):
                 if tran < self.min_transmission_prob or diff_neighbor_words_prob[i] > self.min_diff_neighbor_words_prob:
                     if len(cur_phrase) > 1:
-                        phrase_indices.append(torch.LongTensor(cur_phrase, device=device))
-                    cur_phrase = [i+1]
+                        batch_phrase_indices.append(cur_phrase)
+                        max_phrase_len = max(max_phrase_len, len(cur_phrase))
+                    cur_phrase = [i+1 + i_sent*max_sent_len]
                 else:
-                    cur_phrase.append(i+1)
+                    cur_phrase.append(i+1 + i_sent*max_sent_len)
 
                 if i == len(transmission_prob) - 1 and len(cur_phrase) > 1:
-                    phrase_indices.append(torch.LongTensor(cur_phrase, device=device))
+                    batch_phrase_indices.append(cur_phrase)
+                    max_phrase_len = max(max_phrase_len, len(cur_phrase))
 
-            batch_phrase_indices.append(phrase_indices)
+        for i in range(len(batch_phrase_indices)):
+            if len(batch_phrase_indices[i]) < max_phrase_len:
+                batch_phrase_indices[i] = batch_phrase_indices[i] + \
+                                          [-1] * (max_phrase_len - len(batch_phrase_indices[i])) # padding
 
-        return batch_phrase_indices
+        batch_phrase_indices = torch.LongTensor(batch_phrase_indices, device=device)
+        batch_phrase_mask = batch_phrase_indices == -1
+        batch_phrase_indices.masked_fill_(batch_phrase_mask, 0)
+
+        return [batch_phrase_indices, batch_phrase_mask]
 
     def preprocess(self, x):
         """Preprocess data.
