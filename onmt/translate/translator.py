@@ -466,7 +466,7 @@ class Translator(object):
                     if not self.verbose:
                        sent_number = next(counter)
                     viz_attention(self_attn_folder_save, "align-attn",
-                                 torch.unsqueeze(torch.unsqueeze(trans.attns[0][:, :len(srcs)], 0), 0),
+                                 torch.unsqueeze(torch.unsqueeze(trans.attns[0][:, :len(srcs)], 0), 0).cpu(),
                                  srcs, trans.pred_sents[0], base_cell=0.25, sent_number=sent_number)
                 if self_attn_debug:
                     if not self.verbose:
@@ -480,7 +480,7 @@ class Translator(object):
                     # viz encoding self attention
                     tgt_raw = trans.pred_sents[0]
                     attention_infor = [
-                        ("self-attn-debug", trans.self_attn[:, :, :len(srcs), :len(srcs)],
+                        ("self-attn-debug", trans.self_attn[:, :, :len(srcs), :len(srcs)].cpu(),
                          srcs, srcs, 1.2),
                         # ("decoding-self-attn-debug", trans.decoding_self_attn[0][:, :, :len(tgt_raw), :len(tgt_raw)],
                         #  ["<s>"] + tgt_raw[:-1], ["<s>"] + tgt_raw[:-1], 1.2),

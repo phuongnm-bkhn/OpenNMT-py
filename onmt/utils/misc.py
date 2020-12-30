@@ -213,4 +213,6 @@ def viz_attention(self_attn_folder_save, folder_name, self_attn_data, x_stick, y
                     pad_inches=0)
         plt.close()
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         logging.info(str(e))

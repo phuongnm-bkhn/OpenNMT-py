@@ -227,11 +227,11 @@ class BiGramField(RawField):
                 batch_phrase_indices[i] = batch_phrase_indices[i] + \
                                           [-1] * (max_phrase_len - len(batch_phrase_indices[i])) # padding
 
-        batch_phrase_indices = torch.LongTensor(batch_phrase_indices, device=device)
+        batch_phrase_indices = torch.LongTensor(batch_phrase_indices).to(device)
         batch_phrase_mask = batch_phrase_indices == -1
         batch_phrase_indices.masked_fill_(batch_phrase_mask, 0)
 
-        batch_word_mask = torch.zeros(max_sent_len*len(batch_by_feat[0]))
+        batch_word_mask = torch.zeros(max_sent_len*len(batch_by_feat[0])).to(device)
         batch_word_mask[batch_phrase_indices.masked_select(batch_phrase_mask==False)] = 1
         batch_word_mask = batch_word_mask == 1
 
