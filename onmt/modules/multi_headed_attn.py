@@ -300,10 +300,10 @@ class MultiHeadedAttention(nn.Module):
                 key = key.masked_fill(mask_qkv, 0)
                 value = value.masked_fill(mask_qkv, 0)
 
+            word_mask = phrase_info[2]
             phrase_mask = phrase_info[1]
             phrase_indices = phrase_info[0]
             max_phrase_len = phrase_info[0].shape[1]
-            max_sent_len = query.shape[2]
 
             # prepare data
             # fill out phrase by indices - flatten cross-sentence in batch
@@ -321,16 +321,12 @@ class MultiHeadedAttention(nn.Module):
 
                 # replace original features
                 phrase_un_mask = phrase_mask==False
-                phrase_indices_flatten = phrase_indices.masked_select(phrase_un_mask)
                 phrase_features_flatten = phrase_features.transpose(0,1).transpose(1,2)\
                     .masked_select(phrase_un_mask.unsqueeze(-1).unsqueeze(-1))
 
-                query_mask = torch.zeros(max_sent_len*batch_size)
-                query_mask[phrase_indices_flatten] = 1
-                query_mask = query_mask == 1
                 q_in = q_in.transpose(1, 2)
-                q_in = q_in.reshape(-1, head_count, dim_per_head).masked_scatter(query_mask.unsqueeze(-1).unsqueeze(-1),
-                                                                                   phrase_features_flatten)
+                q_in = q_in.reshape(-1, head_count, dim_per_head).masked_scatter(word_mask.unsqueeze(-1).unsqueeze(-1),
+                                                                                 phrase_features_flatten)
                 q_in = q_in.reshape(batch_size, -1, head_count, dim_per_head).transpose(1, 2)
                 return q_in
 

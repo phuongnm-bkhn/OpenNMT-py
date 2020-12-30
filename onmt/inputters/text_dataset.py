@@ -231,7 +231,11 @@ class BiGramField(RawField):
         batch_phrase_mask = batch_phrase_indices == -1
         batch_phrase_indices.masked_fill_(batch_phrase_mask, 0)
 
-        return [batch_phrase_indices, batch_phrase_mask]
+        batch_word_mask = torch.zeros(max_sent_len*len(batch_by_feat[0]))
+        batch_word_mask[batch_phrase_indices.masked_select(batch_phrase_mask==False)] = 1
+        batch_word_mask = batch_word_mask == 1
+
+        return [batch_phrase_indices, batch_phrase_mask, batch_word_mask]
 
     def preprocess(self, x):
         """Preprocess data.
