@@ -154,7 +154,7 @@ class MultiHeadedAttention(nn.Module):
                                                for gram_size in set(gram_sizes)])
         self.phrase_features = None
         if dyn_statistic_phrase:
-            self.phrase_features = nn.LSTM(self.dim_per_head, self.dim_per_head // 2, batch_first=False,
+            self.phrase_features = nn.LSTM(model_dim, model_dim // 2, batch_first=False,
                                            num_layers=1, bidirectional=True)
 
         if max_relative_positions > 0:
@@ -293,7 +293,7 @@ class MultiHeadedAttention(nn.Module):
                 value[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
                 idx_head_layer += count_h_using
 
-        if self.phrase_features:
+        if self.phrase_features and phrase_info is not None and len(phrase_info[0].shape) > 1:
             if mask is not None:
                 mask_qkv = mask.unsqueeze(-1)  # [B, 1, seq_len, 1]
                 query = query.masked_fill(mask_qkv, 0)
@@ -309,16 +309,17 @@ class MultiHeadedAttention(nn.Module):
             # fill out phrase by indices - flatten cross-sentence in batch
             def phrase_process(q_in):
                 head_count_new = q_in.shape[1]  # head count of data input - is combined of q-k-v, sometime
-                query_t = q_in.transpose(0, 1).reshape(head_count_new, -1, dim_per_head)
+                dim_per_head_new = q_in.shape[-1]
+                query_t = q_in.transpose(0, 1).reshape(head_count_new, -1, dim_per_head_new)
                 phrase_features = query_t.index_select(1, phrase_indices.flatten())  # tensor([ 2,  3,  4,  0,|  6,  7,  8,  9, | 13, 14,  0,  0, | ... ])
                                                                                      # some zero values is the faked indices
-                phrase_features = phrase_features.reshape(head_count_new, -1, max_phrase_len, dim_per_head)
+                phrase_features = phrase_features.reshape(head_count_new, -1, max_phrase_len, dim_per_head_new)
                 phrase_features.masked_fill_(phrase_mask.unsqueeze(dim=0).unsqueeze(dim=-1), 0)  # fill zero values in faked indices
-                phrase_features = phrase_features.reshape(-1, max_phrase_len, dim_per_head)  # virtual_batch x seq x dim
+                phrase_features = phrase_features.reshape(-1, max_phrase_len, dim_per_head_new)  # virtual_batch x seq x dim
 
                 # forward using lstm
                 phrase_features, _last_h = (self.phrase_features(phrase_features.transpose(0, 1)))
-                phrase_features = phrase_features.transpose(0, 1).reshape(head_count_new, -1, max_phrase_len, dim_per_head)
+                phrase_features = phrase_features.transpose(0, 1).reshape(head_count_new, -1, max_phrase_len, dim_per_head_new)
 
                 # replace original features
                 phrase_un_mask = phrase_mask==False
@@ -326,14 +327,15 @@ class MultiHeadedAttention(nn.Module):
                     .masked_select(phrase_un_mask.unsqueeze(-1).unsqueeze(-1))
 
                 q_in = q_in.transpose(1, 2)
-                q_in = q_in.reshape(-1, head_count_new, dim_per_head).masked_scatter(word_mask.unsqueeze(-1).unsqueeze(-1),
+                q_in = q_in.reshape(-1, head_count_new, dim_per_head_new).masked_scatter(word_mask.unsqueeze(-1).unsqueeze(-1),
                                                                                  phrase_features_flatten)
-                q_in = q_in.reshape(batch_size, -1, head_count_new, dim_per_head).transpose(1, 2)
+                q_in = q_in.reshape(batch_size, -1, head_count_new, dim_per_head_new).transpose(1, 2)
                 return q_in
 
-            data_qkv = torch.cat((query, key, value), dim=1)
+            data_qkv = torch.cat((unshape(query).unsqueeze(1), unshape(key).unsqueeze(1), unshape(value).unsqueeze(1)), dim=1)
             data_qkv = phrase_process(data_qkv)
-            query, key, value = torch.split(data_qkv, head_count, dim=1)
+            query, key, value = torch.split(data_qkv, 1, dim=1)
+            query, key, value = shape(query.squeeze(1)), shape(key.squeeze(1)), shape(value.squeeze(1))
 
         key_len = key.size(2)
         query_len = query.size(2)
