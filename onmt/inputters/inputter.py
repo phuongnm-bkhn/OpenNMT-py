@@ -211,6 +211,9 @@ def patch_fields(opt, fields):
     if maybe_cid_field is not None:
         fields.update({'corpus_id': maybe_cid_field})
 
+    if len(opt.dyn_statistic_phrase) > 0:
+        fields['phrase_info'].min_diff_neighbor_words_probs = opt.dyn_statistic_phrase
+
 
 class IterOnDevice(object):
     """Sent items from `iterable` on `device_id` and yield."""
@@ -240,8 +243,10 @@ class IterOnDevice(object):
                 if hasattr(batch, 'align') else None
             batch.corpus_id = batch.corpus_id.to(device) \
                 if hasattr(batch, 'corpus_id') else None
-            batch.phrase_info = [_.to(device) for _ in batch.phrase_info] \
-                if hasattr(batch, 'phrase_info') else None
+            if hasattr(batch, 'phrase_info'):
+                for _view in batch.phrase_info:
+                    for i, data in enumerate(_view[1]):
+                        _view[1][i] = data.to(device)
 
     def __iter__(self):
         for batch in self.iterable:

@@ -232,8 +232,8 @@ def model_opts(parser):
               help="Marking mechanism when build model.")
     group.add('--gram_sizes', '-gram_sizes',default=[], nargs='*', type=int,
               help="gram sizes. See Phrase Transformer.")
-    group.add('--dyn_statistic_phrase', '-dyn_statistic_phrase', default=False, action="store_true",
-              help="using dynamic statistic phrase features.")
+    group.add('--dyn_statistic_phrase', '-dyn_statistic_phrase', default=[], nargs='*', type=float,
+              help="thresholds to separate the phrase based on statistic.")
 
 def preprocess_opts(parser):
     """ Pre-procesing options """
