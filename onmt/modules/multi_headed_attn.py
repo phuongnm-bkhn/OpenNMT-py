@@ -125,7 +125,7 @@ class MultiHeadedAttention(nn.Module):
     """
 
     def __init__(self, head_count, model_dim, dropout=0.1,
-                 max_relative_positions=0, gram_sizes=None, dyn_statistic_phrase=None):
+                 max_relative_positions=0, gram_sizes=None, dyn_statistic_phrase=None, dsp_num_head_applied=None):
         assert model_dim % head_count == 0
         self.dim_per_head = model_dim // head_count
         self.model_dim = model_dim
@@ -152,10 +152,14 @@ class MultiHeadedAttention(nn.Module):
             self.n_gram_features = nn.ModuleDict(ngram_size_info)
             self.n_gram_features_count = dict([(gram_size, len([_x for _x in gram_sizes if _x == gram_size]))
                                                for gram_size in set(gram_sizes)])
+
+        self.dsp_num_head_applied = dsp_num_head_applied or 0
         self.phrase_features = None
-        if dyn_statistic_phrase:
+        if dyn_statistic_phrase and self.dsp_num_head_applied > 0:
             phrase_features = dict([("phrase_features_{}".format(i),
-                                     nn.LSTM(model_dim, model_dim // 2, batch_first=False, num_layers=1,
+                                     nn.LSTM(self.dim_per_head*dsp_num_head_applied,
+                                             self.dim_per_head*dsp_num_head_applied // 2,
+                                             batch_first=False, num_layers=1,
                                              bidirectional=True))
                                     for i, prob in enumerate(dyn_statistic_phrase) if prob > 0])
             self.phrase_features = nn.ModuleDict(phrase_features)
@@ -304,7 +308,9 @@ class MultiHeadedAttention(nn.Module):
                 value = value.masked_fill(mask_qkv, 0)
 
             # prepare data
-            data_qkv = torch.cat((unshape(query).unsqueeze(1), unshape(key).unsqueeze(1), unshape(value).unsqueeze(1)), dim=1)
+            data_qkv_org = torch.cat((unshape(query).unsqueeze(1), unshape(key).unsqueeze(1),
+                                      unshape(value).unsqueeze(1)), dim=1)
+            data_qkv = data_qkv_org[:, :, :, :self.dsp_num_head_applied*dim_per_head]
             data_qkv_accumulation = None
             rate_each_view = 1 / len(phrase_info)
 
@@ -351,7 +357,8 @@ class MultiHeadedAttention(nn.Module):
                     if data_qkv_accumulation is not None else rate_each_view * phrase_process(data_qkv)
 
             # recover shape of query key values
-            query, key, value = torch.split(data_qkv_accumulation, 1, dim=1)
+            data_qkv_org[:, :, :, :self.dsp_num_head_applied*dim_per_head] = data_qkv_accumulation
+            query, key, value = torch.split(data_qkv_org, 1, dim=1)
             query, key, value = shape(query.squeeze(1)), shape(key.squeeze(1)), shape(value.squeeze(1))
 
         key_len = key.size(2)
