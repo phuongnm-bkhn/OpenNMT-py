@@ -47,7 +47,7 @@ class NMTModel(nn.Module):
         soft_tgt_templ = kwargs.get("encoder", {}).get('soft_tgt_templ')[0]
 
         if bptt is False:
-            self.decoder.init_state(src, memory_bank, enc_state)
+            self.decoder.init_state(src, memory_bank, enc_state, soft_tgt_templ)
 
         dec_out, attns = self.decoder(dec_in, memory_bank,
                                       memory_lengths=lengths,
