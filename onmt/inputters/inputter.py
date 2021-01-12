@@ -175,7 +175,6 @@ def get_fields(
     if dynamic_phrase:
         fields["phrase_info"] = BiGramField(base_name='phrase_info',
                                             min_transmission_prob=0.2,
-                                            min_diff_neighbor_words_prob=0.8,
                                             base_field=Field(include_lengths=False))
 
     indices = Field(use_vocab=False, dtype=torch.long, sequential=False)

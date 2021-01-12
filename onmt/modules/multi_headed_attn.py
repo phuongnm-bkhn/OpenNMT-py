@@ -24,14 +24,15 @@ class NgramCombined(nn.Module):
 
 
 class NgramLSTM(nn.Module):
-    def __init__(self, n_gram, input_size):
+    def __init__(self, n_gram, input_size, dropout=0.1):
         super(NgramLSTM, self).__init__()
         self.n_gram = n_gram
 
         self._num_layers = 1
         self.input_size = input_size
         self.hidden_size = input_size
-
+        self.dropout = nn.Dropout(dropout)
+        self.w_residual = nn.Linear(self.hidden_size, self.hidden_size)
         self.rnn = nn.LSTM(self.input_size,
                            self.hidden_size,
                            batch_first=False,
@@ -74,13 +75,16 @@ class NgramLSTM(nn.Module):
         # because we need to get the long-memmory to extract the k-gram features of words
         # in this case, we use num_layers = 1, num_directions=2,
         # we sum all directions
-        _bank_mt, (_h_n, c_n) = self.rnn(zz)
+        _bank_mt, (_h_n, c_n) = self.rnn(self.dropout(zz))
         _aggregate_hidden_n = torch.cat((_h_n, c_n), dim=0)
         out = torch.sum(_aggregate_hidden_n, dim=0)
 
         # finally, we reshape original batch_size to return
         # (batch x seq x hidden_size)
         out = out.reshape(batch_size, -1, hidden_size)
+
+        rate_local_context = torch.sigmoid(self.w_residual(_x))
+        out = rate_local_context*out + (1 - rate_local_context)*_x
         return out
 
 
@@ -147,7 +151,9 @@ class MultiHeadedAttention(nn.Module):
 
         self.n_gram_features = None
         if gram_sizes is not None and len(gram_sizes) == head_count:
-            ngram_size_info = dict([("{}_gram_features".format(gram_size), NgramLSTM(gram_size, self.dim_per_head))
+            ngram_size_info = dict([("{}_gram_features".format(gram_size), NgramLSTM(gram_size,
+                                                                                     self.dim_per_head,
+                                                                                     dropout))
                                     for gram_size in set(gram_sizes) if gram_size > 0])
             self.n_gram_features = nn.ModuleDict(ngram_size_info)
             self.n_gram_features_count = dict([(gram_size, len([_x for _x in gram_sizes if _x == gram_size]))
