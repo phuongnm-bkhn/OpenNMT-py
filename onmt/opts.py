@@ -234,6 +234,8 @@ def model_opts(parser):
               help="gram sizes. See Phrase Transformer.")
     group.add('--dyn_statistic_phrase', '-dyn_statistic_phrase', default=[], nargs='*', type=float,
               help="thresholds to separate the phrase based on statistic.")
+    group.add('--dsp_random_threshold', '-dsp_random_threshold', action="store_true", default=False,
+              help="thresholds is randomized when generate minibatch data.")
     group.add('--dsp_num_head_applied', '-dsp_num_head_applied', default=3, type=int,
               help="number heads using phrase based on statistic.")
 

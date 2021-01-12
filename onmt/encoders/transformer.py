@@ -24,13 +24,15 @@ class TransformerEncoderLayer(nn.Module):
     """
 
     def __init__(self, d_model, heads, d_ff, dropout, attention_dropout,
-                 max_relative_positions=0, gram_sizes=None, dyn_statistic_phrase=None, dsp_num_head_applied=None):
+                 max_relative_positions=0, gram_sizes=None, dyn_statistic_phrase=None, dsp_num_head_applied=None,
+                 dsp_random_threshold=False):
         super(TransformerEncoderLayer, self).__init__()
 
         self.self_attn = MultiHeadedAttention(
             heads, d_model, dropout=attention_dropout,
             max_relative_positions=max_relative_positions, gram_sizes=gram_sizes,
-            dyn_statistic_phrase=dyn_statistic_phrase, dsp_num_head_applied=dsp_num_head_applied)
+            dyn_statistic_phrase=dyn_statistic_phrase, dsp_num_head_applied=dsp_num_head_applied,
+            dsp_random_threshold=dsp_random_threshold)
         self.feed_forward = PositionwiseFeedForward(d_model, d_ff, dropout)
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
         self.dropout = nn.Dropout(dropout)
@@ -101,7 +103,7 @@ class TransformerEncoder(EncoderBase):
     def __init__(self, num_layers, d_model, heads, d_ff, dropout,
                  attention_dropout, embeddings, max_relative_positions,
                  gram_sizes=None, dyn_statistic_phrase=None,
-                 dsp_num_head_applied=None):
+                 dsp_num_head_applied=None, dsp_random_threshold=False):
         super(TransformerEncoder, self).__init__()
 
         self.embeddings = embeddings
@@ -109,7 +111,8 @@ class TransformerEncoder(EncoderBase):
             [TransformerEncoderLayer(
                 d_model, heads, d_ff, dropout, attention_dropout,
                 max_relative_positions=max_relative_positions, gram_sizes=gram_sizes,
-                dyn_statistic_phrase=dyn_statistic_phrase, dsp_num_head_applied=dsp_num_head_applied
+                dyn_statistic_phrase=dyn_statistic_phrase, dsp_num_head_applied=dsp_num_head_applied,
+                dsp_random_threshold=dsp_random_threshold
             )
              for i in range(num_layers)])
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
@@ -129,7 +132,8 @@ class TransformerEncoder(EncoderBase):
             opt.max_relative_positions,
             gram_sizes=opt.gram_sizes,
             dyn_statistic_phrase=opt.dyn_statistic_phrase,
-            dsp_num_head_applied=opt.dsp_num_head_applied
+            dsp_num_head_applied=opt.dsp_num_head_applied,
+            dsp_random_threshold=opt.dsp_random_threshold,
         )
 
     def forward(self, src, lengths=None, **kwargs):

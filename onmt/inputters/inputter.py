@@ -212,6 +212,9 @@ def patch_fields(opt, fields):
 
     if len(opt.dyn_statistic_phrase) > 0:
         fields['phrase_info'].min_diff_neighbor_words_probs = opt.dyn_statistic_phrase
+        fields['phrase_info'].dsp_random_threshold = opt.dsp_random_threshold
+        if not isinstance(opt.dyn_statistic_phrase, list) and len(opt.dyn_statistic_phrase) < 1:
+            raise RuntimeError("dyn statistics phrase using dsp random threshold..")
 
 
 class IterOnDevice(object):

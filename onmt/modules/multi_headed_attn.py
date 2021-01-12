@@ -129,7 +129,8 @@ class MultiHeadedAttention(nn.Module):
     """
 
     def __init__(self, head_count, model_dim, dropout=0.1,
-                 max_relative_positions=0, gram_sizes=None, dyn_statistic_phrase=None, dsp_num_head_applied=None):
+                 max_relative_positions=0, gram_sizes=None, dyn_statistic_phrase=None, dsp_num_head_applied=None,
+                 dsp_random_threshold=False):
         assert model_dim % head_count == 0
         self.dim_per_head = model_dim // head_count
         self.model_dim = model_dim
@@ -162,11 +163,16 @@ class MultiHeadedAttention(nn.Module):
         self.dsp_num_head_applied = dsp_num_head_applied or 0
         self.phrase_features = None
         if dyn_statistic_phrase and self.dsp_num_head_applied > 0:
+            if dsp_random_threshold:
+                dyn_statistic_phrase = [0.1]
             phrase_features = dict([("phrase_features_{}".format(i),
-                                     nn.LSTM(self.dim_per_head*dsp_num_head_applied,
-                                             self.dim_per_head*dsp_num_head_applied // 2,
-                                             batch_first=False, num_layers=1,
-                                             bidirectional=True))
+                                     nn.Sequential(
+                                         nn.Dropout(dropout),
+                                         nn.LSTM(self.dim_per_head*dsp_num_head_applied,
+                                                 self.dim_per_head*dsp_num_head_applied // 2,
+                                                 batch_first=False, num_layers=1,
+                                                 bidirectional=True))
+                                     )
                                     for i, prob in enumerate(dyn_statistic_phrase) if prob > 0])
             self.phrase_features = nn.ModuleDict(phrase_features)
 

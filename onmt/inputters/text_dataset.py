@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import random
 from functools import partial
 
 import six
@@ -153,10 +154,12 @@ class TextMultiField(RawField):
 
 class BiGramField(RawField):
 
-    def __init__(self, base_name, base_field, min_transmission_prob, min_diff_neighbor_words_prob=None):
+    def __init__(self, base_name, base_field, min_transmission_prob, min_diff_neighbor_words_prob=None,
+                 dsp_random_threshold=False):
         super(BiGramField, self).__init__()
         self.min_transmission_prob = min_transmission_prob
         self.min_diff_neighbor_words_probs = min_diff_neighbor_words_prob or []
+        self.dsp_random_threshold = dsp_random_threshold
         self.fields = [(base_name, base_field)]
 
     @property
@@ -188,6 +191,12 @@ class BiGramField(RawField):
             max_sent_len = max(max_sent_len, len(sent) + 1)
 
         batch_phrases_multiview = []
+        if not self.dsp_random_threshold:
+            pass
+        else:
+            self.min_diff_neighbor_words_probs = [1.0/100 * random.randint(
+                int(min(self.min_diff_neighbor_words_probs) * 100),
+                int(max(self.min_diff_neighbor_words_probs) * 100))]
         for min_diff_neighbor_words_prob in self.min_diff_neighbor_words_probs:
             max_phrase_len = 0
             batch_phrase_indices = []
