@@ -203,36 +203,54 @@ class BiGramField(RawField):
             for i_sent, sent in enumerate(batch_by_feat[0]):
                 if len(sent) == 0:
                     continue
-                transmission_prob = []
-                diff_neighbor_words_prob = []
-                for bi_gram in sent:
-                    first_w, second_w = bi_gram.split(" ")
-                    if self.base_field.vocab.freqs[first_w] != 0:
-                        transmission_prob.append(self.base_field.vocab.freqs[bi_gram] / self.base_field.vocab.freqs[first_w])
-                    else:
-                        transmission_prob.append(0.0)
 
-                    max_neighbor_prob = max(self.base_field.vocab.freqs[first_w], self.base_field.vocab.freqs[second_w])
-                    if max_neighbor_prob != 0:
-                        diff_neighbor_words_prob.append(
-                            abs(self.base_field.vocab.freqs[first_w] - self.base_field.vocab.freqs[second_w]) /
-                            max_neighbor_prob)
-                    else:
-                        diff_neighbor_words_prob.append(1.0)
+                if min_diff_neighbor_words_prob <= 1.0:
+                    transmission_prob = []
+                    diff_neighbor_words_prob = []
+                    for bi_gram in sent:
+                        first_w, second_w = bi_gram.split(" ")
+                        if self.base_field.vocab.freqs[first_w] != 0:
+                            transmission_prob.append(self.base_field.vocab.freqs[bi_gram] / self.base_field.vocab.freqs[first_w])
+                        else:
+                            transmission_prob.append(0.0)
 
-                cur_phrase = [0 + i_sent*max_sent_len]
-                for i, tran in enumerate(transmission_prob):
-                    if tran < self.min_transmission_prob or diff_neighbor_words_prob[i] > min_diff_neighbor_words_prob:
-                        if len(cur_phrase) > 1:
+                        max_neighbor_prob = max(self.base_field.vocab.freqs[first_w], self.base_field.vocab.freqs[second_w])
+                        if max_neighbor_prob != 0:
+                            diff_neighbor_words_prob.append(
+                                abs(self.base_field.vocab.freqs[first_w] - self.base_field.vocab.freqs[second_w]) /
+                                max_neighbor_prob)
+                        else:
+                            diff_neighbor_words_prob.append(1.0)
+
+                    cur_phrase = [0 + i_sent*max_sent_len]
+                    for i, tran in enumerate(transmission_prob):
+                        if tran < self.min_transmission_prob or diff_neighbor_words_prob[i] > min_diff_neighbor_words_prob:
+                            if len(cur_phrase) > 1:
+                                batch_phrase_indices.append(cur_phrase)
+                                max_phrase_len = max(max_phrase_len, len(cur_phrase))
+                            cur_phrase = [i+1 + i_sent*max_sent_len]
+                        else:
+                            cur_phrase.append(i+1 + i_sent*max_sent_len)
+
+                        if i == len(transmission_prob) - 1 and len(cur_phrase) > 1:
                             batch_phrase_indices.append(cur_phrase)
                             max_phrase_len = max(max_phrase_len, len(cur_phrase))
-                        cur_phrase = [i+1 + i_sent*max_sent_len]
-                    else:
-                        cur_phrase.append(i+1 + i_sent*max_sent_len)
-
-                    if i == len(transmission_prob) - 1 and len(cur_phrase) > 1:
-                        batch_phrase_indices.append(cur_phrase)
-                        max_phrase_len = max(max_phrase_len, len(cur_phrase))
+                else:
+                    # special case for bpe phrases () special params = 1.1
+                    if len(sent) > 0:
+                        org_s = sent[0].split(" ")
+                        for i, bi_gram in enumerate(sent[1:]):
+                            org_s.append(bi_gram.split(" ")[-1])
+                        cur_phrase = []
+                        for i, w in enumerate(org_s):
+                            if w.endswith("@@"):
+                                cur_phrase.append(i + i_sent*max_sent_len)
+                            else:
+                                if len(cur_phrase) > 0:
+                                    cur_phrase.append(i + i_sent*max_sent_len)
+                                    batch_phrase_indices.append(cur_phrase)
+                                    max_phrase_len = max(max_phrase_len, len(cur_phrase))
+                                    cur_phrase = []
 
             for i in range(len(batch_phrase_indices)):
                 if len(batch_phrase_indices[i]) < max_phrase_len:
