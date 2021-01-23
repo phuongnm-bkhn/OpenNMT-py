@@ -7,6 +7,7 @@ import torch.nn as nn
 from onmt.encoders.encoder import EncoderBase
 from onmt.modules import MultiHeadedAttention
 from onmt.modules.position_ffn import PositionwiseFeedForward
+from onmt.modules.tree_self_attention import GroupAttention
 from onmt.utils.misc import sequence_mask
 import torch
 
@@ -24,7 +25,7 @@ class TransformerMultiEncoderLayer(nn.Module):
     """
 
     def __init__(self, d_model, heads, d_ff, dropout, attention_dropout,
-                 max_relative_positions=0, gram_sizes=None):
+                 max_relative_positions=0, gram_sizes=None, tree_self_attn=False):
         super(TransformerMultiEncoderLayer, self).__init__()
 
         self.self_attn = MultiHeadedAttention(
@@ -35,8 +36,11 @@ class TransformerMultiEncoderLayer(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.save_self_attn = False
         self.self_attn_data = None
-
-    def forward(self, inputs, mask):
+        if tree_self_attn:
+            self.tree_self_attn = GroupAttention(d_model, no_cuda=True)
+        else:
+            self.tree_self_attn = None
+    def forward(self, inputs, mask, group_prob=None):
         """
         Args:
             inputs (FloatTensor): ``(batch_size, src_len, model_dim)``
@@ -47,14 +51,19 @@ class TransformerMultiEncoderLayer(nn.Module):
 
             * outputs ``(batch_size, src_len, model_dim)``
         """
+        if self.tree_self_attn is not None:
+            group_prob, break_prob = self.tree_self_attn(inputs, mask, group_prob)
+        else:
+            group_prob = None
+
         input_norm = self.layer_norm(inputs)
         context, self_attn_data = self.self_attn(input_norm, input_norm, input_norm,
-                                    mask=mask, attn_type="self")
+                                    mask=mask, attn_type="self", group_prob=group_prob)
         if self.save_self_attn:
             self.self_attn_data = self_attn_data
 
         out = self.dropout(context) + inputs
-        return self.feed_forward(out)
+        return self.feed_forward(out), group_prob
 
     def update_dropout(self, dropout, attention_dropout):
         self.self_attn.update_dropout(attention_dropout)
@@ -109,7 +118,7 @@ class TransformerMultiEncoder(EncoderBase):
         self.transformer = nn.ModuleList(
             [TransformerMultiEncoderLayer(
                 d_model, heads, d_ff, dropout, attention_dropout,
-                max_relative_positions=max_relative_positions, gram_sizes=gram_sizes)
+                max_relative_positions=max_relative_positions, gram_sizes=gram_sizes, tree_self_attn=True)
              for i in range(num_layers)])
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
 
@@ -149,16 +158,22 @@ class TransformerMultiEncoder(EncoderBase):
         soft_tgt_templ_emb = self.soft_tgt_templ_emb(soft_tgt_templ)
         # emb = emb + constituent_tree_feat.reshape(emb.shape)
 
-        def transformer_identical_forward(emb, transformer_blocks, layer_norm, lengths):
+        def transformer_identical_forward(emb, transformer_blocks, layer_norm, lengths, using_group_tree=False):
             out = emb.transpose(0, 1).contiguous()
             mask = ~sequence_mask(lengths).unsqueeze(1)
             # Run the forward pass of every layer of the tranformer.
-            for layer in transformer_blocks:
-                out = layer(out, mask)
+            if using_group_tree:
+                group_prob = 0.
+                for layer in transformer_blocks:
+                    out, group_prob = layer(out, mask, group_prob)
+            else:
+                for layer in transformer_blocks:
+                    out, group_prob = layer(out, mask)
             out = layer_norm(out)
             return out
 
-        out_src = transformer_identical_forward(emb, self.transformer, self.layer_norm, lengths=lengths)
+        out_src = transformer_identical_forward(emb, self.transformer, self.layer_norm, lengths=lengths,
+                                                using_group_tree=True)
         out_soft_tgt_templ = transformer_identical_forward(soft_tgt_templ_emb, self.transformer_soft_tgt_templ,
                                                            self.layer_norm_soft_tgt_templ,
                                                            lengths=lengths_soft_tgt_templ)
