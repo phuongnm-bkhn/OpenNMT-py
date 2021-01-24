@@ -7,6 +7,7 @@ import torch.nn as nn
 from onmt.encoders.encoder import EncoderBase
 from onmt.modules import MultiHeadedAttention
 from onmt.modules.position_ffn import PositionwiseFeedForward
+from onmt.modules.tree_self_attention import GroupAttention
 from onmt.utils.misc import sequence_mask
 
 
@@ -24,7 +25,7 @@ class TransformerEncoderLayer(nn.Module):
     """
 
     def __init__(self, d_model, heads, d_ff, dropout, attention_dropout,
-                 max_relative_positions=0, gram_sizes=None):
+                 max_relative_positions=0, gram_sizes=None, hierarchical_self_attn=False):
         super(TransformerEncoderLayer, self).__init__()
 
         self.self_attn = MultiHeadedAttention(
@@ -35,8 +36,12 @@ class TransformerEncoderLayer(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.save_self_attn = False
         self.self_attn_data = None
+        if hierarchical_self_attn:
+            self.tree_self_attn = GroupAttention(d_model)
+        else:
+            self.tree_self_attn = None
 
-    def forward(self, inputs, mask):
+    def forward(self, inputs, mask, group_prob=None):
         """
         Args:
             inputs (FloatTensor): ``(batch_size, src_len, model_dim)``
@@ -47,14 +52,19 @@ class TransformerEncoderLayer(nn.Module):
 
             * outputs ``(batch_size, src_len, model_dim)``
         """
+        if self.tree_self_attn is not None:
+            group_prob, break_prob = self.tree_self_attn(inputs, mask, group_prob)
+        else:
+            group_prob = None
+
         input_norm = self.layer_norm(inputs)
         context, self_attn_data = self.self_attn(input_norm, input_norm, input_norm,
-                                    mask=mask, attn_type="self")
+                                    mask=mask, attn_type="self", group_prob=group_prob)
         if self.save_self_attn:
             self.self_attn_data = self_attn_data
 
         out = self.dropout(context) + inputs
-        return self.feed_forward(out)
+        return self.feed_forward(out), group_prob
 
     def update_dropout(self, dropout, attention_dropout):
         self.self_attn.update_dropout(attention_dropout)
@@ -97,16 +107,19 @@ class TransformerEncoder(EncoderBase):
     """
 
     def __init__(self, num_layers, d_model, heads, d_ff, dropout,
-                 attention_dropout, embeddings, max_relative_positions, gram_sizes=None):
+                 attention_dropout, embeddings, max_relative_positions, gram_sizes=None,
+                 hierarchical_self_attn=False):
         super(TransformerEncoder, self).__init__()
 
         self.embeddings = embeddings
         self.transformer = nn.ModuleList(
             [TransformerEncoderLayer(
                 d_model, heads, d_ff, dropout, attention_dropout,
-                max_relative_positions=max_relative_positions, gram_sizes=gram_sizes)
+                max_relative_positions=max_relative_positions, gram_sizes=gram_sizes,
+                hierarchical_self_attn=hierarchical_self_attn)
              for i in range(num_layers)])
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
+        self.hierarchical_self_attn = hierarchical_self_attn
 
     @classmethod
     def from_opt(cls, opt, embeddings):
@@ -121,7 +134,8 @@ class TransformerEncoder(EncoderBase):
             is list else opt.attention_dropout,
             embeddings,
             opt.max_relative_positions,
-            gram_sizes=opt.gram_sizes
+            gram_sizes=opt.gram_sizes,
+            hierarchical_self_attn=opt.hierarchical_self_attn
         )
 
     def forward(self, src, lengths=None):
@@ -132,9 +146,14 @@ class TransformerEncoder(EncoderBase):
 
         out = emb.transpose(0, 1).contiguous()
         mask = ~sequence_mask(lengths).unsqueeze(1)
+
+        group_prob = None
+        if self.hierarchical_self_attn:
+            group_prob = 0.
+
         # Run the forward pass of every layer of the tranformer.
         for layer in self.transformer:
-            out = layer(out, mask)
+            out, group_prob = layer(out, mask, group_prob)
         out = self.layer_norm(out)
 
         return emb, out.transpose(0, 1).contiguous(), lengths

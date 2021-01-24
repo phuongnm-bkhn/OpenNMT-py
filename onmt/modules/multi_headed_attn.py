@@ -159,7 +159,7 @@ class MultiHeadedAttention(nn.Module):
                 vocab_size, self.dim_per_head)
 
     def forward(self, key, value, query, mask=None,
-                layer_cache=None, attn_type=None):
+                layer_cache=None, attn_type=None, group_prob=None):
         """
         Compute the context vector and the attention vectors.
 
@@ -309,6 +309,8 @@ class MultiHeadedAttention(nn.Module):
 
         # 3) Apply attention dropout and compute context vectors.
         attn = self.softmax(scores).to(query.dtype)
+        if group_prob is not None:
+            attn = attn * group_prob.unsqueeze(1)
         drop_attn = self.dropout(attn)
 
         context_original = torch.matmul(drop_attn, value)

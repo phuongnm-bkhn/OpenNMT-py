@@ -232,6 +232,8 @@ def model_opts(parser):
               help="Marking mechanism when build model.")
     group.add('--gram_sizes', '-gram_sizes',default=[], nargs='*', type=int,
               help="gram sizes. See Phrase Transformer.")
+    group.add('--hierarchical_self_attn', '-hierarchical_self_attn', action="store_true", default=False,
+              help="using Hierarchical Self Attention in Transformer.")
 
 def preprocess_opts(parser):
     """ Pre-procesing options """
