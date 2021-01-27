@@ -170,6 +170,11 @@ class Dataset(TorchtextDataset):
             for sample in examples:
                 setattr(sample, 'src_label', [transformed_data[sample.indices][3]])
 
+        if 'phrase_info' in org_fields:
+            for sample in examples:
+                setattr(sample, 'phrase_info', [[w + " " + sample.src[0][i+1]
+                                                 for i, w in enumerate(sample.src[0]) if i+1 < len(sample.src[0])]])
+
         super(Dataset, self).__init__(examples, fields, filter_pred)
 
     def __getattr__(self, attr):

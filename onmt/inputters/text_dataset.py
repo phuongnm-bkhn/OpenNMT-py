@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import random
 from functools import partial
 
 import six
@@ -132,6 +133,123 @@ class TextMultiField(RawField):
             return data, lengths
         else:
             return data
+
+    def preprocess(self, x):
+        """Preprocess data.
+
+        Args:
+            x (str): A sentence string (words joined by whitespace).
+
+        Returns:
+            List[List[str]]: A list of length ``len(self.fields)`` containing
+                lists of tokens/feature tags for the sentence. The output
+                is ordered like ``self.fields``.
+        """
+
+        return [f.preprocess(x) for _, f in self.fields]
+
+    def __getitem__(self, item):
+        return self.fields[item]
+
+
+class BiGramField(RawField):
+
+    def __init__(self, base_name, base_field, min_transmission_prob, min_diff_neighbor_words_prob=None,
+                 dsp_random_threshold=False):
+        super(BiGramField, self).__init__()
+        self.min_transmission_prob = min_transmission_prob
+        self.min_diff_neighbor_words_probs = min_diff_neighbor_words_prob or []
+        self.dsp_random_threshold = dsp_random_threshold
+        self.fields = [(base_name, base_field)]
+
+    @property
+    def base_field(self):
+        return self.fields[0][1]
+
+    def process(self, batch, device=None):
+        """Convert outputs of preprocess into Tensors.
+
+        Args:
+            batch (List[List[List[str]]]): A list of length batch size.
+                Each element is a list of the preprocess results for each
+                field (which are lists of str "words" or feature tags.
+            device (torch.device or str): The device on which the tensor(s)
+                are built.
+
+        Returns:
+            torch.LongTensor or Tuple[LongTensor, LongTensor]:
+                A tensor of shape ``(seq_len, batch_size, len(self.fields))``
+                where the field features are ordered like ``self.fields``.
+                If the base field returns lengths, these are also returned
+                and have shape ``(batch_size,)``.
+        """
+
+        # batch (list(list(list))): batch_size x len(self.fields) x seq_len
+        batch_by_feat = list(zip(*batch))
+        max_sent_len = 0
+        for sent in batch_by_feat[0]:
+            max_sent_len = max(max_sent_len, len(sent) + 1)
+
+        batch_phrases_multiview = []
+        if not self.dsp_random_threshold:
+            pass
+        else:
+            self.min_diff_neighbor_words_probs = [1.0/100 * random.randint(
+                int(min(self.min_diff_neighbor_words_probs) * 100),
+                int(max(self.min_diff_neighbor_words_probs) * 100))]
+        for min_diff_neighbor_words_prob in self.min_diff_neighbor_words_probs:
+            max_phrase_len = 0
+            batch_phrase_indices = []
+            for i_sent, sent in enumerate(batch_by_feat[0]):
+                if len(sent) == 0:
+                    continue
+                transmission_prob = []
+                diff_neighbor_words_prob = []
+                for bi_gram in sent:
+                    first_w, second_w = bi_gram.split(" ")
+                    if self.base_field.vocab.freqs[first_w] != 0:
+                        transmission_prob.append(self.base_field.vocab.freqs[bi_gram] / self.base_field.vocab.freqs[first_w])
+                    else:
+                        transmission_prob.append(0.0)
+
+                    max_neighbor_prob = max(self.base_field.vocab.freqs[first_w], self.base_field.vocab.freqs[second_w])
+                    if max_neighbor_prob != 0:
+                        diff_neighbor_words_prob.append(
+                            abs(self.base_field.vocab.freqs[first_w] - self.base_field.vocab.freqs[second_w]) /
+                            max_neighbor_prob)
+                    else:
+                        diff_neighbor_words_prob.append(1.0)
+
+                cur_phrase = [0 + i_sent*max_sent_len]
+                for i, tran in enumerate(transmission_prob):
+                    if tran < self.min_transmission_prob or diff_neighbor_words_prob[i] > min_diff_neighbor_words_prob:
+                        if len(cur_phrase) > 1:
+                            batch_phrase_indices.append(cur_phrase)
+                            max_phrase_len = max(max_phrase_len, len(cur_phrase))
+                        cur_phrase = [i+1 + i_sent*max_sent_len]
+                    else:
+                        cur_phrase.append(i+1 + i_sent*max_sent_len)
+
+                    if i == len(transmission_prob) - 1 and len(cur_phrase) > 1:
+                        batch_phrase_indices.append(cur_phrase)
+                        max_phrase_len = max(max_phrase_len, len(cur_phrase))
+
+            for i in range(len(batch_phrase_indices)):
+                if len(batch_phrase_indices[i]) < max_phrase_len:
+                    batch_phrase_indices[i] = batch_phrase_indices[i] + \
+                                              [-1] * (max_phrase_len - len(batch_phrase_indices[i])) # padding
+
+            batch_phrase_indices = torch.LongTensor(batch_phrase_indices).to(device)
+            batch_phrase_mask = batch_phrase_indices == -1
+            batch_phrase_indices.masked_fill_(batch_phrase_mask, 0)
+
+            batch_word_mask = torch.zeros(max_sent_len*len(batch_by_feat[0])).to(device)
+            batch_word_mask[batch_phrase_indices.masked_select(batch_phrase_mask==False)] = 1
+            batch_word_mask = batch_word_mask == 1
+
+            batch_phrases_multiview.append([min_diff_neighbor_words_prob,
+                                            [batch_phrase_indices, batch_phrase_mask, batch_word_mask]])
+        return batch_phrases_multiview
 
     def preprocess(self, x):
         """Preprocess data.

@@ -19,19 +19,20 @@ class NgramCombined(nn.Module):
         if self.n_gram > 1:
             for i_gram in range(1, self.n_gram):
                 out = F.pad(x.transpose(-1, -2), [i_gram, 0],
-                            mode='constant', value=0).transpose(-1, -2)[:,:-i_gram,:] + x
-        return out
+                            mode='constant', value=0).transpose(-1, -2)[:,:-i_gram,:] + out
+        return out / self.n_gram
 
 
 class NgramLSTM(nn.Module):
-    def __init__(self, n_gram, input_size):
+    def __init__(self, n_gram, input_size, dropout=0.1):
         super(NgramLSTM, self).__init__()
         self.n_gram = n_gram
 
         self._num_layers = 1
         self.input_size = input_size
         self.hidden_size = input_size
-
+        self.dropout = nn.Dropout(dropout)
+        self.w_residual = nn.Linear(self.hidden_size, self.hidden_size)
         self.rnn = nn.LSTM(self.input_size,
                            self.hidden_size,
                            batch_first=False,
@@ -74,13 +75,16 @@ class NgramLSTM(nn.Module):
         # because we need to get the long-memmory to extract the k-gram features of words
         # in this case, we use num_layers = 1, num_directions=2,
         # we sum all directions
-        _bank_mt, (_h_n, c_n) = self.rnn(zz)
+        _bank_mt, (_h_n, c_n) = self.rnn(self.dropout(zz))
         _aggregate_hidden_n = torch.cat((_h_n, c_n), dim=0)
         out = torch.sum(_aggregate_hidden_n, dim=0)
 
         # finally, we reshape original batch_size to return
         # (batch x seq x hidden_size)
         out = out.reshape(batch_size, -1, hidden_size)
+
+        rate_local_context = torch.sigmoid(self.w_residual(_x))
+        out = rate_local_context*out + (1 - rate_local_context)*_x
         return out
 
 
@@ -125,7 +129,8 @@ class MultiHeadedAttention(nn.Module):
     """
 
     def __init__(self, head_count, model_dim, dropout=0.1,
-                 max_relative_positions=0, gram_sizes=None):
+                 max_relative_positions=0, gram_sizes=None, dyn_statistic_phrase=None, dsp_num_head_applied=None,
+                 dsp_random_threshold=False):
         assert model_dim % head_count == 0
         self.dim_per_head = model_dim // head_count
         self.model_dim = model_dim
@@ -147,11 +152,29 @@ class MultiHeadedAttention(nn.Module):
 
         self.n_gram_features = None
         if gram_sizes is not None and len(gram_sizes) == head_count:
-            ngram_size_info = dict([("{}_gram_features".format(gram_size), NgramLSTM(gram_size, self.dim_per_head))
+            ngram_size_info = dict([("{}_gram_features".format(gram_size), NgramLSTM(gram_size,
+                                                                                     self.dim_per_head,
+                                                                                     dropout))
                                     for gram_size in set(gram_sizes) if gram_size > 0])
             self.n_gram_features = nn.ModuleDict(ngram_size_info)
             self.n_gram_features_count = dict([(gram_size, len([_x for _x in gram_sizes if _x == gram_size]))
                                                for gram_size in set(gram_sizes)])
+
+        self.dsp_num_head_applied = dsp_num_head_applied or 0
+        self.phrase_features = None
+        if dyn_statistic_phrase and self.dsp_num_head_applied > 0:
+            if dsp_random_threshold:
+                dyn_statistic_phrase = [0.1]
+            phrase_features = dict([("phrase_features_{}".format(i),
+                                     nn.Sequential(
+                                         nn.Dropout(dropout),
+                                         nn.LSTM(self.dim_per_head*dsp_num_head_applied,
+                                                 self.dim_per_head*dsp_num_head_applied // 2,
+                                                 batch_first=False, num_layers=1,
+                                                 bidirectional=True))
+                                     )
+                                    for i, prob in enumerate(dyn_statistic_phrase) if prob > 0])
+            self.phrase_features = nn.ModuleDict(phrase_features)
 
         if max_relative_positions > 0:
             vocab_size = max_relative_positions * 2 + 1
@@ -159,7 +182,7 @@ class MultiHeadedAttention(nn.Module):
                 vocab_size, self.dim_per_head)
 
     def forward(self, key, value, query, mask=None,
-                layer_cache=None, attn_type=None):
+                layer_cache=None, attn_type=None, phrase_info=None):
         """
         Compute the context vector and the attention vectors.
 
@@ -288,6 +311,67 @@ class MultiHeadedAttention(nn.Module):
                 key[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _k.reshape(batch_size, -1, query_len, dim_per_head)
                 value[:, idx_head_layer:idx_head_layer+count_h_using, :, :] = _v.reshape(batch_size, -1, query_len, dim_per_head)
                 idx_head_layer += count_h_using
+
+        if self.phrase_features and phrase_info is not None:
+            if mask is not None:
+                mask_qkv = mask.unsqueeze(-1)  # [B, 1, seq_len, 1]
+                query = query.masked_fill(mask_qkv, 0)
+                key = key.masked_fill(mask_qkv, 0)
+                value = value.masked_fill(mask_qkv, 0)
+
+            # prepare data
+            data_qkv_org = torch.cat((unshape(query).unsqueeze(1), unshape(key).unsqueeze(1),
+                                      unshape(value).unsqueeze(1)), dim=1)
+            data_qkv = data_qkv_org[:, :, :, :self.dsp_num_head_applied*dim_per_head]
+            data_qkv_accumulation = None
+            rate_each_view = 1 / len(phrase_info)
+
+            for i_view, _view in enumerate(phrase_info):
+                if not len(_view[1][0].shape) > 1:
+                    data_qkv_accumulation = data_qkv_accumulation + rate_each_view * data_qkv \
+                        if data_qkv_accumulation is not None else rate_each_view * data_qkv
+                    continue
+
+                word_mask = _view[1][2]
+                phrase_mask = _view[1][1]
+                phrase_indices = _view[1][0]
+                max_phrase_len = _view[1][0].shape[1]
+                phrase_processor = self.phrase_features["phrase_features_{}".format(i_view)]
+
+                # prepare data
+                # fill out phrase by indices - flatten cross-sentence in batch
+                def phrase_process(q_in):
+                    head_count_new = q_in.shape[1]  # head count of data input - is combined of q-k-v, sometime
+                    dim_per_head_new = q_in.shape[-1]
+                    query_t = q_in.transpose(0, 1).reshape(head_count_new, -1, dim_per_head_new)
+                    phrase_features = query_t.index_select(1, phrase_indices.flatten())  # tensor([ 2,  3,  4,  0,|  6,  7,  8,  9, | 13, 14,  0,  0, | ... ])
+                                                                                         # some zero values is the faked indices
+                    phrase_features = phrase_features.reshape(head_count_new, -1, max_phrase_len, dim_per_head_new)
+                    phrase_features.masked_fill_(phrase_mask.unsqueeze(dim=0).unsqueeze(dim=-1), 0)  # fill zero values in faked indices
+                    phrase_features = phrase_features.reshape(-1, max_phrase_len, dim_per_head_new)  # virtual_batch x seq x dim
+
+                    # forward using lstm
+                    phrase_features, _last_h = phrase_processor(phrase_features.transpose(0, 1))
+                    phrase_features = phrase_features.transpose(0, 1).reshape(head_count_new, -1, max_phrase_len, dim_per_head_new)
+
+                    # replace original features
+                    phrase_un_mask = phrase_mask==False
+                    phrase_features_flatten = phrase_features.transpose(0,1).transpose(1,2)\
+                        .masked_select(phrase_un_mask.unsqueeze(-1).unsqueeze(-1))
+
+                    q_in = q_in.transpose(1, 2)
+                    q_in = q_in.reshape(-1, head_count_new, dim_per_head_new).masked_scatter(word_mask.unsqueeze(-1).unsqueeze(-1),
+                                                                                     phrase_features_flatten)
+                    q_in = q_in.reshape(batch_size, -1, head_count_new, dim_per_head_new).transpose(1, 2)
+                    return q_in
+
+                data_qkv_accumulation = data_qkv_accumulation + rate_each_view * phrase_process(data_qkv) \
+                    if data_qkv_accumulation is not None else rate_each_view * phrase_process(data_qkv)
+
+            # recover shape of query key values
+            data_qkv_org[:, :, :, :self.dsp_num_head_applied*dim_per_head] = data_qkv_accumulation
+            query, key, value = torch.split(data_qkv_org, 1, dim=1)
+            query, key, value = shape(query.squeeze(1)), shape(key.squeeze(1)), shape(value.squeeze(1))
 
         key_len = key.size(2)
         query_len = query.size(2)

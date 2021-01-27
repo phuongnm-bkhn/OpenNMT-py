@@ -13,7 +13,7 @@ from torchtext.data import Field, RawField, LabelField
 from torchtext.vocab import Vocab
 from torchtext.data.utils import RandomShuffler
 
-from onmt.inputters.text_dataset import text_fields, TextMultiField
+from onmt.inputters.text_dataset import text_fields, TextMultiField, BiGramField
 from onmt.inputters.image_dataset import image_fields
 from onmt.inputters.audio_dataset import audio_fields
 from onmt.inputters.vec_dataset import vec_fields
@@ -171,6 +171,12 @@ def get_fields(
     if marking_mechanism:
         fields["src_label"] = fields_getters["text"](**tgt_field_kwargs)
 
+    dynamic_phrase = True
+    if dynamic_phrase:
+        fields["phrase_info"] = BiGramField(base_name='phrase_info',
+                                            min_transmission_prob=0.2,
+                                            base_field=Field(include_lengths=False))
+
     indices = Field(use_vocab=False, dtype=torch.long, sequential=False)
     fields["indices"] = indices
 
@@ -204,6 +210,12 @@ def patch_fields(opt, fields):
     if maybe_cid_field is not None:
         fields.update({'corpus_id': maybe_cid_field})
 
+    if len(opt.dyn_statistic_phrase) > 0:
+        fields['phrase_info'].min_diff_neighbor_words_probs = opt.dyn_statistic_phrase
+        fields['phrase_info'].dsp_random_threshold = opt.dsp_random_threshold
+        if not isinstance(opt.dyn_statistic_phrase, list) and len(opt.dyn_statistic_phrase) < 1:
+            raise RuntimeError("dyn statistics phrase using dsp random threshold..")
+
 
 class IterOnDevice(object):
     """Sent items from `iterable` on `device_id` and yield."""
@@ -233,6 +245,10 @@ class IterOnDevice(object):
                 if hasattr(batch, 'align') else None
             batch.corpus_id = batch.corpus_id.to(device) \
                 if hasattr(batch, 'corpus_id') else None
+            if hasattr(batch, 'phrase_info'):
+                for _view in batch.phrase_info:
+                    for i, data in enumerate(_view[1]):
+                        _view[1][i] = data.to(device)
 
     def __iter__(self):
         for batch in self.iterable:
@@ -450,6 +466,14 @@ def _build_fields_vocab(fields, counters, data_type, share_vocab,
             src_label_multifield = fields["src_label"]
             _build_fv_from_multifield(
                 src_label_multifield,
+                counters,
+                build_fv_args,
+                size_multiple=1)
+        if "phrase_info" in fields:
+            build_fv_args["phrase_info"] = dict()
+            counters['phrase_info'].update(counters['src'])
+            _build_fv_from_multifield(
+                fields["phrase_info"],
                 counters,
                 build_fv_args,
                 size_multiple=1)
