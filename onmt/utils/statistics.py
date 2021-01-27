@@ -4,6 +4,8 @@ import time
 import math
 import sys
 
+from nltk.translate.bleu_score import corpus_bleu
+
 from onmt.utils.logging import logger
 
 
@@ -17,13 +19,14 @@ class Statistics(object):
     * elapsed time
     """
 
-    def __init__(self, loss=0, n_words=0, n_correct=0, count_sent=0, count_sent_correct=0):
+    def __init__(self, loss=0, n_words=0, n_correct=0, count_sent=0, count_sent_correct=0, bleu_stats=None):
         self.loss = loss
         self.n_words = n_words
         self.n_correct = n_correct
         self.n_src_words = 0
         self.n_sent = count_sent
         self.n_sent_correct = count_sent_correct
+        self.bleu_stats = bleu_stats or {'pred': [], 'tgt': []}
         self.start_time = time.time()
 
     @staticmethod
@@ -85,6 +88,9 @@ class Statistics(object):
         self.n_correct += stat.n_correct
         self.n_sent += stat.n_sent
         self.n_sent_correct += stat.n_sent_correct
+        if self.bleu_stats is not None and stat.bleu_stats is not None:
+            self.bleu_stats['tgt'] = self.bleu_stats['tgt'] + stat.bleu_stats['tgt']
+            self.bleu_stats['pred'] = self.bleu_stats['pred'] + stat.bleu_stats['pred']
 
         if update_n_src_words:
             self.n_src_words += stat.n_src_words
@@ -96,6 +102,15 @@ class Statistics(object):
     def accuracy_sent(self):
         """ compute accuracy """
         return 100 * (self.n_sent_correct / self.n_sent) if self.n_sent > 0 else 0
+
+    def bleu(self):
+        """ compute bleu score """
+        if len(self.bleu_stats['tgt']) == len(self.bleu_stats['pred']):
+            references = [[x.split()] for x in self.bleu_stats['tgt']]
+            candidates = [x.split() for x in self.bleu_stats['pred']]
+            return corpus_bleu(references, candidates)
+
+        return 0
 
     def xent(self):
         """ compute cross entropy """
@@ -122,11 +137,12 @@ class Statistics(object):
         if num_steps > 0:
             step_fmt = "%s/%5d" % (step_fmt, num_steps)
         logger.info(
-            ("Step %s; acc: %6.2f; sent_acc: %6.2f; ppl: %5.2f; xent: %4.2f; " +
+            ("Step %s; acc: %6.2f; sent_acc: %6.2f; bleu: %6.4f; ppl: %5.2f; xent: %4.2f; " +
              "lr: %7.5f; %3.0f/%3.0f tok/s; %6.0f sec")
             % (step_fmt,
                self.accuracy(),
                self.accuracy_sent(),
+               self.bleu(),
                self.ppl(),
                self.xent(),
                learning_rate,
@@ -142,5 +158,6 @@ class Statistics(object):
         writer.add_scalar(prefix + "/ppl", self.ppl(), step)
         writer.add_scalar(prefix + "/accuracy", self.accuracy(), step)
         writer.add_scalar(prefix + "/accuracy_sent", self.accuracy_sent(), step)
+        writer.add_scalar(prefix + "/bleu", self.bleu(), step)
         writer.add_scalar(prefix + "/tgtper", self.n_words / t, step)
         writer.add_scalar(prefix + "/lr", learning_rate, step)

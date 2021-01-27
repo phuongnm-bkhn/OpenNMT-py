@@ -75,13 +75,29 @@ class AccuracySentenceLevelScorer(Scorer):
         return stats.accuracy_sent()
 
 
-DEFAULT_SCORERS = [PPLScorer(), AccuracyScorer(), AccuracySentenceLevelScorer()]
+class BleuScorer(Scorer):
+
+    def __init__(self):
+        super(BleuScorer, self).__init__(float("-inf"), "bleu")
+
+    def is_improving(self, stats):
+        return stats.bleu() > self.best_score
+
+    def is_decreasing(self, stats):
+        return stats.bleu() < self.best_score
+
+    def _caller(self, stats):
+        return stats.bleu()
+
+
+DEFAULT_SCORERS = [PPLScorer(), AccuracyScorer(), AccuracySentenceLevelScorer(), BleuScorer()]
 
 
 SCORER_BUILDER = {
     "ppl": PPLScorer,
     "accuracy": AccuracyScorer,
-    "accuracy_sent": AccuracySentenceLevelScorer
+    "accuracy_sent": AccuracySentenceLevelScorer,
+    "bleu": BleuScorer
 }
 
 
