@@ -228,12 +228,12 @@ class LossComputeBase(nn.Module):
                             # add gold sentence
                             if not flag_add_tgt and (target_lb[i_w][sent_i] == self.eos_token_idx or
                                     i_w == result_with_batch.size(0) - 1):
-                                bleu_stats['tgt'].append(' '.join([str(num.item()) for num in target_lb[:i_w +1, sent_i]]))
+                                bleu_stats['tgt'].append(' '.join([str(num.item()) for num in target_lb[:i_w, sent_i]]))
                                 flag_add_tgt = True
                             # add predicted sentence
                             if not flag_add_pred and (prediction_lb[i_w][sent_i] == self.eos_token_idx or
                                     i_w == result_with_batch.size(0) - 1):
-                                bleu_stats['pred'].append(' '.join([str(num.item()) for num in prediction_lb[:i_w+1, sent_i]]))
+                                bleu_stats['pred'].append(' '.join([str(num.item()) for num in prediction_lb[:i_w, sent_i]]))
                                 flag_add_pred = True
 
                         flag_sent_right = True
