@@ -1,6 +1,7 @@
 """
 Implementation of "Attention is All You Need"
 """
+import random
 
 import torch
 import torch.nn as nn
@@ -176,14 +177,19 @@ class TransformerMultiSrcDecoderLayer(nn.Module):
                                        mask=src_pad_mask,
                                        layer_cache=layer_cache,
                                        attn_type="context")
-        template_mid, template_attns = self.context_attn(template_memory_bank, template_memory_bank, query_norm,
-                                       mask=template_pad_mask,
-                                       layer_cache=template_layer_cache,
-                                       attn_type="context")
 
         # incorporating source language with template
-        source_rate = self.rating_calculator(self.weight_template(template_mid) + self.weight_source(mid))
-        mid = source_rate*mid + (1 - source_rate)*template_mid
+        alpha = 0.5
+        picker = random.uniform(0, 1)
+        if picker < alpha:
+            template_mid, template_attns = self.context_attn(template_memory_bank, template_memory_bank, query_norm,
+                                                             mask=template_pad_mask,
+                                                             layer_cache=template_layer_cache,
+                                                             attn_type="context")
+            source_rate = self.rating_calculator(self.weight_template(template_mid) + self.weight_source(mid))
+            mid = source_rate*mid + (1 - source_rate)*template_mid
+        else:
+            pass
 
         output = self.feed_forward(self.drop(mid) + query)
 
