@@ -65,7 +65,8 @@ def build_loss_compute(model, tgt_field, opt, train=True):
     else:
         compute = NMTLossCompute(
             criterion, loss_gen, lambda_coverage=opt.lambda_coverage,
-            lambda_align=opt.lambda_align, eos_token_idx = tgt_field.vocab.stoi[tgt_field.eos_token])
+            lambda_align=opt.lambda_align, eos_token_idx=tgt_field.vocab.stoi[tgt_field.eos_token],
+            is_training=train)
 
     compute.to(device)
 
@@ -91,11 +92,13 @@ class LossComputeBase(nn.Module):
         normalzation (str): normalize by "sents" or "tokens"
     """
 
-    def __init__(self, criterion, generator, enc_criterion=None, enc_generator=None):
+    def __init__(self, criterion, generator, enc_criterion=None, enc_generator=None, eos_token_idx=None,
+                 is_training=True):
         super(LossComputeBase, self).__init__()
         self.criterion = criterion
         self.generator = generator
-        self.eos_token_idx = None
+        self.eos_token_idx = eos_token_idx
+        self.is_training = is_training
 
     @property
     def padding_idx(self):
@@ -193,58 +196,63 @@ class LossComputeBase(nn.Module):
         num_correct = pred.eq(target).masked_select(non_padding).sum().item()
         num_non_padding = non_padding.sum().item()
 
-        # calculate the precision sentence level
-        count_sent_correct = 0
-        count_sent = 0
-        bleu_stats = {'pred': [], 'tgt': []}
-        if batch_size is not None:
-            prediction_lb = pred.view(-1, batch_size)
-            target_lb = target.view(-1, batch_size)
+        # calculate the precision sentence level in valid mode
+        if not self.is_training:
+            count_sent_correct = 0
+            count_sent = 0
+            bleu_stats = {'pred': [], 'tgt': []}
+            if batch_size is not None:
+                prediction_lb = pred.view(-1, batch_size)
+                target_lb = target.view(-1, batch_size)
 
-            result_with_batch = pred.eq(target).view(-1, batch_size)
-            non_padding_batch = target.ne(self.padding_idx).view(-1, batch_size)
-            for sent_i in range(batch_size):
-                flag_is_sent = False
-                for i_w in range(result_with_batch.size(0)):
-                    if non_padding_batch[i_w][sent_i]:
-                        count_sent += 1
-                        flag_is_sent = True
-                        break
-
-                # detect eos_token_idx to get the end of sentence prediction
-                if flag_is_sent and self.eos_token_idx is None:
-                    for i_w in range(result_with_batch.size(0)):
-                        if not non_padding_batch[i_w][sent_i] or i_w == result_with_batch.size(0) - 1:
-                            self.eos_token_idx = target.view(-1, batch_size)[i_w][sent_i].item()
-
-                if flag_is_sent:
-                    flag_add_tgt = False
-                    flag_add_pred = False
-                    for i_w in range(result_with_batch.size(0)):
-                        # add gold sentence
-                        if not flag_add_tgt and (target_lb[i_w][sent_i] == self.eos_token_idx or
-                                i_w == result_with_batch.size(0) - 1):
-                            bleu_stats['tgt'].append(' '.join([str(num.item()) for num in target_lb[:i_w +1, sent_i]]))
-                            flag_add_tgt = True
-                        # add predicted sentence
-                        if not flag_add_pred and (prediction_lb[i_w][sent_i] == self.eos_token_idx or
-                                i_w == result_with_batch.size(0) - 1):
-                            bleu_stats['pred'].append(' '.join([str(num.item()) for num in prediction_lb[:i_w+1, sent_i]]))
-                            flag_add_pred = True
-
-                    flag_sent_right = True
+                result_with_batch = pred.eq(target).view(-1, batch_size)
+                non_padding_batch = target.ne(self.padding_idx).view(-1, batch_size)
+                for sent_i in range(batch_size):
+                    flag_is_sent = False
                     for i_w in range(result_with_batch.size(0)):
                         if non_padding_batch[i_w][sent_i]:
-                            if not result_with_batch[i_w][sent_i]:
-                                flag_sent_right = False
-                                break
-                        else:
+                            count_sent += 1
+                            flag_is_sent = True
                             break
-                    if flag_sent_right:
-                        count_sent_correct += 1
 
-        return onmt.utils.Statistics(loss.item(), num_non_padding, num_correct, count_sent_correct=count_sent_correct,
-                                     count_sent=count_sent, bleu_stats=bleu_stats)
+                    # detect eos_token_idx to get the end of sentence prediction
+                    if flag_is_sent and self.eos_token_idx is None:
+                        for i_w in range(result_with_batch.size(0)):
+                            if not non_padding_batch[i_w][sent_i] or i_w == result_with_batch.size(0) - 1:
+                                self.eos_token_idx = target.view(-1, batch_size)[i_w][sent_i].item()
+
+                    if flag_is_sent:
+                        flag_add_tgt = False
+                        flag_add_pred = False
+                        for i_w in range(result_with_batch.size(0)):
+                            # add gold sentence
+                            if not flag_add_tgt and (target_lb[i_w][sent_i] == self.eos_token_idx or
+                                    i_w == result_with_batch.size(0) - 1):
+                                bleu_stats['tgt'].append(' '.join([str(num.item()) for num in target_lb[:i_w +1, sent_i]]))
+                                flag_add_tgt = True
+                            # add predicted sentence
+                            if not flag_add_pred and (prediction_lb[i_w][sent_i] == self.eos_token_idx or
+                                    i_w == result_with_batch.size(0) - 1):
+                                bleu_stats['pred'].append(' '.join([str(num.item()) for num in prediction_lb[:i_w+1, sent_i]]))
+                                flag_add_pred = True
+
+                        flag_sent_right = True
+                        for i_w in range(result_with_batch.size(0)):
+                            if non_padding_batch[i_w][sent_i]:
+                                if not result_with_batch[i_w][sent_i]:
+                                    flag_sent_right = False
+                                    break
+                            else:
+                                break
+                        if flag_sent_right:
+                            count_sent_correct += 1
+
+            return onmt.utils.Statistics(loss.item(), num_non_padding, num_correct,
+                                         count_sent_correct=count_sent_correct,
+                                         count_sent=count_sent, bleu_stats=bleu_stats)
+        else:
+            return onmt.utils.Statistics(loss.item(), num_non_padding, num_correct)
+
 
     def _bottle(self, _v):
         return _v.view(-1, _v.size(2))
@@ -289,11 +297,10 @@ class NMTLossCompute(LossComputeBase):
     """
 
     def __init__(self, criterion, generator, normalization="sents",
-                 lambda_coverage=0.0, lambda_align=0.0, eos_token_idx=None):
-        super(NMTLossCompute, self).__init__(criterion, generator)
+                 lambda_coverage=0.0, lambda_align=0.0, eos_token_idx=None, is_training=True):
+        super(NMTLossCompute, self).__init__(criterion, generator, eos_token_idx=eos_token_idx, is_training=is_training)
         self.lambda_coverage = lambda_coverage
         self.lambda_align = lambda_align
-        self.eos_token_idx = eos_token_idx
 
     def _make_shard_state(self, batch, output, range_, attns=None):
         shard_state = {

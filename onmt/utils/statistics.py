@@ -26,8 +26,8 @@ class Statistics(object):
         self.n_src_words = 0
         self.n_sent = count_sent
         self.n_sent_correct = count_sent_correct
-        self.bleu_stats = bleu_stats or {'pred': [], 'tgt': []}
         self.start_time = time.time()
+        self.bleu_stats = bleu_stats or {'pred': [], 'tgt': []}
 
     @staticmethod
     def all_gather_stats(stat, max_size=4096):
@@ -105,7 +105,7 @@ class Statistics(object):
 
     def bleu(self):
         """ compute bleu score """
-        if len(self.bleu_stats['tgt']) == len(self.bleu_stats['pred']):
+        if len(self.bleu_stats['tgt']) > 0 and len(self.bleu_stats['tgt']) == len(self.bleu_stats['pred']):
             references = [[x.split()] for x in self.bleu_stats['tgt']]
             candidates = [x.split() for x in self.bleu_stats['pred']]
             return corpus_bleu(references, candidates)
