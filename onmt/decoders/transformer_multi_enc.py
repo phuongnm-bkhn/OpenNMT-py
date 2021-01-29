@@ -181,7 +181,7 @@ class TransformerMultiSrcDecoderLayer(nn.Module):
         # incorporating source language with template
         alpha = 0.5
         picker = random.uniform(0, 1)
-        if picker < alpha:
+        if picker < alpha or not self.training:
             template_mid, template_attns = self.context_attn(template_memory_bank, template_memory_bank, query_norm,
                                                              mask=template_pad_mask,
                                                              layer_cache=template_layer_cache,
