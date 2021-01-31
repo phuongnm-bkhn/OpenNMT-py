@@ -145,7 +145,7 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
         src_field = fields["src"]
         src_emb = build_embeddings(model_opt, src_field)
         if "soft_tgt_templ" in fields:
-            encoder_kwargs["soft_tgt_templ_emb"] = build_embeddings(model_opt, src_field)
+            encoder_kwargs["soft_tgt_templ_emb"] = build_embeddings(model_opt, fields['soft_tgt_templ'])
         if "constituent_tree" in fields:
             encoder_kwargs["src_constituent_tree_emb"] = ConstituentTreeEncoder(fields["constituent_tree"].base_field,
                                                               embedding_dim=model_opt.enc_rnn_size,
